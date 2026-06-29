@@ -101,7 +101,6 @@ def render_metadata_card(metadata: dict) -> None:
     build    = metadata.get("genome_build",metadata.get("HmPOS_build",   "N/A"))
     citation = metadata.get("citation",    metadata.get("Citation",       "N/A"))
     pgp_id   = metadata.get("pgp_id",      metadata.get("PGP ID",        "N/A"))
-    license_ = metadata.get("license",     metadata.get("License",        "N/A"))
     accessed = metadata.get("date_accessed", date.today().isoformat())
 
     st.markdown(
@@ -154,7 +153,7 @@ st.sidebar.subheader("🎯 Target Variant", help = "This tool **searches by chro
 target_rsid_input = st.sidebar.text_input(
     "Target rsID Name (must match search position)",
     value="rs10305420",
-    help="Used to caption your scan results.",
+    help="Used to caption your scan results and query the LDLink API",
 )
 genome_build = st.sidebar.selectbox("Genome Assembly", ["GRCh38", "GRCh37"], index=0, help="The genome assembly used in the PGS file.")
 population   = st.sidebar.selectbox(
@@ -332,7 +331,7 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
             return ""
 
         styled = results_df.style.map(highlight_status, subset=["Match_Status"])
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+        st.dataframe(styled, width='stretch', hide_index=True)
 
         # Build output CSV with metadata header comments
         header_comments = appV3.build_output_header(
