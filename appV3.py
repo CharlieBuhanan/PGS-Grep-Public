@@ -1,10 +1,9 @@
-# TODO: Option to filter only for LD Proxies (checkbox in sidebar)
-# TODO: Allow user to check button to only see proxies.
+# TODO: Option to filter only for LD Proxies (checkbox in sidebar). Allow user to check button to only see proxies.
 # TODO: Add option to use D' and/or R^2. above the configuration bar
 # TODO: Loading bar for file scanning, update progress every 500 lines or so.
 # TODO: GUI GUI GUI GUI GUI UI UX
 
-
+# TODO: Check code. Make sure search logic is right. Make sure D' value recorded. 
 # TODO: Make sure README is accurate. Help message for setup LD API token, user side / release public
 # TODO: Extend test cases
 # TODO: Read through, check test suite. Testing suite: make sure this works for all harmonized formats including edge cases (missing columns, missing rsIDs, etc.)
