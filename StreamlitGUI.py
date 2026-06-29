@@ -187,7 +187,7 @@ proxies_only = st.sidebar.checkbox(
 )
 
 # ─── PGS File Source ──────────────────────────────────────────────────────────
-st.subheader("📁 PGS File")
+st.subheader("📁 Polygenic Score (PGS) File")
 
 file_to_scan       = None
 pgs_source_label   = ""
@@ -231,7 +231,7 @@ elif file_to_scan is None and os.path.exists(local_file_fallback):
     pgs_source_label = local_file_fallback
     st.info(f"💡 Using local dev file: `{local_file_fallback}`")
 elif file_to_scan is None:
-    st.info("📥 Upload a harmonized `.txt.gz` PGS Catalog file, or use the Fetch tab above.")
+    st.info(" Upload a file to begin! ")
 
 
 # ─── Metadata preview (shown as soon as a file is available) ─────────────────
@@ -325,7 +325,7 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
     progress_status.empty()
 
     # ── Metadata card (from scanned file header) ──────────────────────────
-    st.subheader("📄 Source File Metadata")
+    st.subheader("📄 Source File Data")
     render_metadata_card(engine.last_metadata)
 
     # Step 3 — results dashboard
@@ -333,7 +333,7 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
 
     if exact_match:
         st.balloons()
-        st.success(f"🎉 **Exact match:** `{target_rsid_input}` found directly at Chr{chromosome}:{target_pos:,}.")
+        st.success(f"✅ **Exact match:** `{target_rsid_input}` found directly at Chr{chromosome}:{target_pos:,}.")
     elif proxy_matches:
         st.info(
             f"🔮 **Proxy match:** Target absent at Chr{chromosome}:{target_pos:,}, but "
@@ -351,7 +351,7 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
     m3.metric("Variants in Window",   len(results_df))
 
     if not results_df.empty:
-        st.subheader("📋 Genomic Data Viewer")
+        st.subheader("📋 Data Viewer")
 
         # ── TODO: Allow user to check button to only see proxies ─────────
         # Apply the proxies_only sidebar filter before rendering the table.
@@ -377,7 +377,7 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
 
         if not display_df.empty:
             styled = display_df.style.map(highlight_status, subset=["Match_Status"])
-            st.dataframe(styled, use_container_width=True, hide_index=True)
+            st.dataframe(styled, width='stretch', hide_index=True)
 
         # Build output CSV with metadata header comments
         # Note: export always uses the full results_df regardless of the proxy filter,

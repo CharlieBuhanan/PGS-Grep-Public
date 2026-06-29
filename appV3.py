@@ -1,9 +1,10 @@
-# TODO: Option to filter only for LD Proxies (checkbox in sidebar). Allow user to check button to only see proxies.
-# TODO: Add option to use D' and/or R^2. above the configuration bar
-# TODO: Loading bar for file scanning, update progress every 500 lines or so.
 # TODO: GUI GUI GUI GUI GUI UI UX
 
-# TODO: Check code. Make sure search logic is right. Make sure D' value recorded. 
+# TODO: Fix claude slight bugs. Loading bar accurate. Incorrect lines read for loading bar. Change 'proxy matches only' to include actual variant too.
+# TODO: UI: make the end result replace everything else on the screen. Change some button colors.
+# TODO: tooltip for LD Cache. Attempt to move configuration settings to right side of screen. Different font. 
+# Main title chunked rather than long single line. Image somewhere! Some more light blues.
+
 # TODO: Make sure README is accurate. Help message for setup LD API token, user side / release public
 # TODO: Extend test cases
 # TODO: Read through, check test suite. Testing suite: make sure this works for all harmonized formats including edge cases (missing columns, missing rsIDs, etc.)
@@ -11,6 +12,7 @@
 # TODO: Figure out chromosome 23 handling (X/Y/MT) in LDlink and harmonized PGS files.  LDlink uses 23 for X, 24 for Y, 25 for MT.  Harmonized PGS files use chr_name = "X", "Y", "MT".  Need to map these correctly in the scan.
 # TODO: Update & Check test suite. Test README file instructions, edit & revise README. Update requirements.txt if necessary
 # TODO: Make this more efficient. Better clear cache button
+# Future: option to see all LD proxies (view cache file basically)
 
 import gzip
 import io
@@ -119,21 +121,38 @@ def extract_pgs_metadata(file_object) -> dict:
     return metadata
 
 
-def build_output_header(metadata: dict, target_rsid: str, population: str,
-                         genome_build: str, r2_threshold: float) -> str:
+def build_output_header(
+    metadata: dict,
+    target_rsid: str,
+    population: str,
+    genome_build: str,
+    r2_threshold: float | None = None,
+    dprime_threshold: float | None = None,
+) -> str:
     """
     Build a comment block for the top of the CSV output file.
 
     Args:
-        metadata:      Dict returned by extract_pgs_metadata().
-        target_rsid:   The queried rsID.
-        population:    LD population code.
-        genome_build:  Genome assembly string.
-        r2_threshold:  R² linkage filter applied.
+        metadata:          Dict returned by extract_pgs_metadata().
+        target_rsid:       The queried rsID.
+        population:        LD population code.
+        genome_build:      Genome assembly string.
+        r2_threshold:      R² linkage filter applied, or None if not used.
+        dprime_threshold:  D′ linkage filter applied, or None if not used.
 
     Returns:
         A multi-line string of '#'-prefixed comment lines.
     """
+    # Build human-readable LD filter description
+    if r2_threshold is not None and dprime_threshold is not None:
+        ld_filter_str = f"R² ≥ {r2_threshold} AND D′ ≥ {dprime_threshold}"
+    elif r2_threshold is not None:
+        ld_filter_str = f"R² ≥ {r2_threshold}"
+    elif dprime_threshold is not None:
+        ld_filter_str = f"D′ ≥ {dprime_threshold}"
+    else:
+        ld_filter_str = "None"
+
     lines = [
         "# LD-Aware PGS Grepper — Scan Output",
         "#",
@@ -151,7 +170,7 @@ def build_output_header(metadata: dict, target_rsid: str, population: str,
         f"# Target rsID      : {target_rsid}",
         f"# LD Population    : {population}",
         f"# Genome Assembly  : {genome_build}",
-        f"# R² Threshold     : {r2_threshold}",
+        f"# LD Filter        : {ld_filter_str}",
         "#",
     ]
     return "\n".join(lines) + "\n"
@@ -182,9 +201,19 @@ class PGSScanEngine:
         filename = f"LD{rsid}_{population}_{safe_build}.txt"
         return os.path.join(constants.LD_CACHE_DIR, filename)
 
-    def _parse_ld_text(self, text: str, r2_threshold: float) -> dict[int, dict]:
+    def _parse_ld_text(
+        self,
+        text: str,
+        r2_threshold: float | None,
+        dprime_threshold: float | None,
+    ) -> dict[int, dict]:
         """
         Parse LDlink API response text into a map of proxies.
+
+        Filters rows by whichever combination of R² / D′ thresholds are active.
+        Both thresholds must pass when both are provided.
+        Raw D′ values from LDlink can be negative (indicating repulsion phase LD);
+        we compare against the absolute value, which is standard practice.
         """
         ld_map: dict[int, dict] = {}
         if "RS_Number" not in text:
@@ -200,31 +229,65 @@ class PGSScanEngine:
         except ValueError:
             return ld_map
 
+        # D′ column is optional — gracefully absent in some LDlink responses
+        try:
+            dprime_idx: int | None = headers.index("Dprime")
+        except ValueError:
+            dprime_idx = None
+
         for line in lines[1:]:
             cols = line.split()
             if len(cols) <= max(rs_idx, pos_idx, r2_idx):
                 continue
             try:
                 r2_val = float(cols[r2_idx])
-                if r2_val >= r2_threshold:
-                    pos = int(cols[pos_idx].split(":")[-1])
-                    ld_map[pos] = {
-                        "rsid": cols[rs_idx],
-                        "r2":   r2_val,
-                    }
+
+                dprime_val: float | None = None
+                if dprime_idx is not None and dprime_idx < len(cols):
+                    try:
+                        dprime_val = abs(float(cols[dprime_idx]))
+                    except ValueError:
+                        dprime_val = None
+
+                # Apply R² filter
+                if r2_threshold is not None and r2_val < r2_threshold:
+                    continue
+
+                # Apply D′ filter (skip row if D′ is required but unavailable)
+                if dprime_threshold is not None:
+                    if dprime_val is None or dprime_val < dprime_threshold:
+                        continue
+
+                pos = int(cols[pos_idx].split(":")[-1])
+                ld_map[pos] = {
+                    "rsid":   cols[rs_idx],
+                    "r2":     r2_val,
+                    "dprime": dprime_val,  # None when column absent
+                }
             except (ValueError, IndexError):
                 continue
         return ld_map
 
     def fetch_ld_proxies(
         self,
-        target_rsid:   str,
-        genome_build:  str,
-        r2_threshold:  float,
-        population:    str = "EUR",
+        target_rsid:      str,
+        genome_build:     str,
+        population:       str = "EUR",
+        r2_threshold:     float | None = None,
+        dprime_threshold: float | None = None,
     ) -> dict[int, dict]:
         """
         Fetch LD proxy variants for a target rsID using LDlink API (or cache).
+
+        Thresholds are applied after fetching. The raw API response is always
+        cached unfiltered so threshold changes don't require a new API call.
+
+        Args:
+            target_rsid:      rsID to query (e.g. "rs10305420").
+            genome_build:     "GRCh38" or "GRCh37".
+            population:       1000 Genomes population code (e.g. "EUR").
+            r2_threshold:     Minimum R² to include a proxy, or None to skip R² filter.
+            dprime_threshold: Minimum |D′| to include a proxy, or None to skip D′ filter.
         """
         self.ld_map = {}
         cache_file  = self._cache_path(target_rsid, population, genome_build)
@@ -233,7 +296,7 @@ class PGSScanEngine:
             st.info(f"📂 Loading LD data from cache: `{cache_file}`")
             with open(cache_file, "r", encoding="utf-8") as f:
                 cached_text = f.read()
-            self.ld_map = self._parse_ld_text(cached_text, r2_threshold)
+            self.ld_map = self._parse_ld_text(cached_text, r2_threshold, dprime_threshold)
             return self.ld_map
 
         if not self.token:
@@ -272,33 +335,49 @@ class PGSScanEngine:
             st.error(f"❌ LDlink API error: {text.strip()}")
             return self.ld_map
 
+        # Cache the raw response unfiltered — threshold changes reuse this file
         with open(cache_file, "w", encoding="utf-8") as f:
             f.write(text)
         st.success(f"✅ LD response saved to cache: `{cache_file}`")
 
-        self.ld_map = self._parse_ld_text(text, r2_threshold)
+        self.ld_map = self._parse_ld_text(text, r2_threshold, dprime_threshold)
         return self.ld_map
 
     def execute_scan(
         self,
         file_object,
-        chr_number:   int,
-        target_pos:   int,
-        start_window: int,
-        end_window:   int,
-        target_rsid: str 
+        chr_number:        int,
+        target_pos:        int,
+        start_window:      int,
+        end_window:        int,
+        target_rsid:       str,
+        progress_callback  = None,
     ) -> tuple[bool, list, pd.DataFrame]:
         """
         Scan a gzipped PGS file for target and LD proxy variants in a genomic window.
         Also populates self.last_metadata with the file's header metadata.
-        """
 
-        exact_match:   bool  = False
-        proxy_matches: list  = []
+        Args:
+            file_object:        File path (str) or Streamlit UploadedFile (.txt.gz).
+            chr_number:         Chromosome to restrict scan to.
+            target_pos:         Exact base-pair position of the target variant.
+            start_window:       Start of the genomic search window.
+            end_window:         End of the genomic search window.
+            target_rsid:        rsID of the target variant (used as fallback label).
+            progress_callback:  Optional callable(lines_read, lines_total, variants_found).
+                                Called every PROGRESS_INTERVAL data lines.
+                                lines_total is None because gzipped files cannot be
+                                cheaply pre-counted without a full decompression pass.
+        """
+        PROGRESS_INTERVAL = 500
+
+        exact_match:    bool = False
+        proxy_matches:  list = []
         rows_processed: list = []
+        lines_read:     int  = 0
         target_chr_str = str(chr_number).replace("chr", "")
 
-        # Extract metadata before scanning
+        # Extract metadata before scanning (resets seek position internally)
         self.last_metadata = extract_pgs_metadata(file_object)
 
         ld_rsid_by_pos: dict[int, str] = {
@@ -333,6 +412,12 @@ class PGSScanEngine:
                         continue
                     else:
                         continue
+
+                lines_read += 1
+
+                # Fire progress callback every PROGRESS_INTERVAL data lines
+                if progress_callback and lines_read % PROGRESS_INTERVAL == 0:
+                    progress_callback(lines_read, None, len(rows_processed))
 
                 def safe_get(idx, default="N/A"):
                     if idx is None or idx >= len(columns):
@@ -369,7 +454,13 @@ class PGSScanEngine:
                     exact_match = True
                 elif current_pos in self.ld_map:
                     p = self.ld_map[current_pos]
-                    status_flag = f"🔗 LD PROXY ({p['rsid']}, r²={p['r2']:.3f})"
+                    # Include D′ in the label when it was fetched
+                    if p.get("dprime") is not None:
+                        status_flag = (
+                            f"🔗 LD PROXY ({p['rsid']}, r²={p['r2']:.3f}, D′={p['dprime']:.3f})"
+                        )
+                    else:
+                        status_flag = f"🔗 LD PROXY ({p['rsid']}, r²={p['r2']:.3f})"
                     proxy_matches.append((current_pos, p["rsid"], p["r2"], weight))
                 else:
                     status_flag = "Unlinked Region Variant"
@@ -383,6 +474,10 @@ class PGSScanEngine:
                     "effect_weight": weight,
                     "Match_Status":  status_flag,
                 })
+
+        # Final callback so the GUI always reaches 100 %
+        if progress_callback:
+            progress_callback(lines_read, None, len(rows_processed))
 
         df = pd.DataFrame(rows_processed, columns=OUTPUT_COLS) if rows_processed else pd.DataFrame(columns=OUTPUT_COLS)
         return exact_match, proxy_matches, df
