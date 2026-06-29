@@ -1,4 +1,13 @@
 
+# TODO: Option to filter only for LD Proxies (checkbox in sidebar)
+# TODO: Debug (delete) MyVariant.info API.
+# TODO: make requirements.txt
+# TODO: Allow user to check button to only see proxies.
+# TODO: Add option to use D' and/or R^2. above the configuration bar
+# TODO: Make sure README is accurate. Help message for setup LD API token, user side / release public
+# TODO: GUI GUI GUI GUI GUI UI UX
+
+
 # TODO: Extend test cases
 # TODO: Read through, check test suite. Testing suite: make sure this works for all harmonized formats including edge cases (missing columns, missing rsIDs, etc.)
 # TODO: UI/UX as in notes, test interactions to make sure it won't crash with spam. Ease of use, little question marks everywhere
