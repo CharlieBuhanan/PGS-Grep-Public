@@ -1,0 +1,10 @@
+# PGS Grep — Python dependencies
+# Install with: pip install -r requirements.txt
+
+streamlit>=1.35.0
+pandas>=2.0.0
+requests>=2.31.0
+
+# Testing (optional)
+pytest>=7.0.0
+pytest-mock>=3.0.0
