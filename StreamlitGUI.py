@@ -100,10 +100,9 @@ st.title("🧬 PGS Grep")
 st.markdown(
     "PGS Grep is a utility for searching SNPs within Polygenic Score (PGS) files from the [PGS Catalog](https://www.pgscatalog.org/). " \
     "It helps users locate variant information across PGS datasets and recover " 
-    "related results using linkage equilibrium (LD) data from the "
-    "[1000 Genome project](https://www.internationalgenome.org/). " \
-    "This LD information is fetched from the public [LDlink API](https://ldlink.nih.gov/apiaccess)."
+    "related results using linkage equilibrium (LD) data fetched from [LDlink API](https://ldlink.nih.gov/apiaccess)."
 )
+st.divider()
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
 st.sidebar.header("🛠️ Configuration")
@@ -112,17 +111,17 @@ token_input = st.sidebar.text_input(
     "LDLink API Token",
     value="",
     type="password",
-    help="Required for first-time queries. Cached results do not need a token.",
+    help="Get a free token at https://ldlink.nih.gov/apiaccess. Required for first-time queries, identical fetched results are cached for future use.",
 )
 
 
 # ── Target variant ────────────────────────────────────────────────────────────
-st.sidebar.subheader("🎯 Target Variant", help = "This tool **searches by chromosomal position** (not by rsID). "
-        "Set the chromosome and position manually. You can look up the position of a variant at https://www.ncbi.nlm.nih.gov/gdv")
+st.sidebar.subheader("🎯 Target Variant", help = "This tool **searches by chromosomal position**, not by rsID. "
+        "You can look up the position of a variant at https://www.ncbi.nlm.nih.gov/gdv.")
 target_rsid_input = st.sidebar.text_input(
-    "Target rsID Name (must match search position)",
+    "Target rsID",
     value="rs10305420",
-    help="Used to caption your scan results and query the LDLink API",
+    help="This must be within the genomic window you specify below. Used to query the LDLink API.",
 )
 genome_build = st.sidebar.selectbox("Genome Assembly", ["GRCh38", "GRCh37"], index=0, help="The genome assembly used in the PGS file.")
 population   = st.sidebar.selectbox(
@@ -130,11 +129,10 @@ population   = st.sidebar.selectbox(
 )
 r2_filter = st.sidebar.slider("R² Linkage Threshold", 0.0, 1.0, 0.7, 0.05)
 
-st.sidebar.subheader("📍 Genomic Search Position", help = "The scan searches for variants **at this chromosomal position** (and nearby "
-    "LD proxies). Use the button below to auto-fill from the rsID above."
+st.sidebar.subheader("📍 Genomic Search Position", help = "The scan searches for variants and nearby LD Proxies **in this genomic window**. " \
+"To find the position of a variant, you can look it up at https://www.ncbi.nlm.nih.gov/gdv."
 )
 
-# ── Auto-fill button ──────────────────────────────────────────────────────────
 if "resolved_chr" not in st.session_state:
     st.session_state["resolved_chr"] = 6
 if "resolved_pos" not in st.session_state:
@@ -142,24 +140,22 @@ if "resolved_pos" not in st.session_state:
 
 chromosome  = st.sidebar.number_input(
     "Chromosome #",
-    min_value=1, max_value=23,
+    min_value=1, max_value=25,
     value=st.session_state["resolved_chr"],
 )
 target_pos = st.sidebar.number_input(
-    "Center Position (BP) ← scan target",
+    "Center Position (SNP position)",
     value=st.session_state["resolved_pos"],
-    help="The scan looks for variants AT this base-pair position (exact match) and LD proxies within the window below.",
+    help="The scan searches for variants at this base-pair position and LD proxies within the specified window.",
 )
-window_size = st.sidebar.number_input("Flanking Size (+/- BP)", value=10_000, step=1_000)
+window_size = st.sidebar.number_input("Flanking Size (+/-)", value=10_000, step=1_000, help="Creates a window of this many base pairs on either side of the center point.")
 
 start_window = target_pos - window_size
 end_window   = target_pos + window_size
-st.sidebar.caption(f"Search window: Chr{chromosome}:{start_window:,} – {end_window:,}")
+st.sidebar.caption(f"Search window: Chr{chromosome}:{start_window:,} - {end_window:,}")
 
 # ─── PGS File Source ──────────────────────────────────────────────────────────
-st.subheader("📁 PGS Score File")
-
-#source_tab_api, source_tab_upload = st.tabs(["🌐 Fetch from PGS Catalog", "📤 Upload file manually"])
+st.subheader("📁 PGS File")
 
 file_to_scan       = None
 pgs_source_label   = ""
@@ -167,11 +163,12 @@ pgs_source_label   = ""
 # ── Tab: Manual upload (backup) ─────────────────────────────────────────────
 col_upload, col_md5 = st.columns([3, 2])
 with col_upload:
+    st.markdown("**Upload PGS File**", help="Download a harmonized PGS file from https://www.pgscatalog.org/ and attach here. The file must be in the `.txt.gz` format. No need to unzip!")
     uploaded_file = st.file_uploader(
-        "**Harmonized PGS Score File (.txt.gz)**", type=["gz"]
+        "Harmonized PGS Score File (.txt.gz)", type=["gz"]
     )
 with col_md5:
-    st.markdown("**MD5 Checksum Verification** *(optional)*")
+    st.markdown("**MD5 Verification** *(optional)*", help="An MD5 file can be provided to verify the integrity of the uploaded PGS file. If the MD5 hash does not match, the scan will still proceed but results may be unreliable.")
     uploaded_md5 = st.file_uploader(
         "MD5 File (.md5) — leave blank to skip", type=["md5", "txt"], key="md5"
     )
