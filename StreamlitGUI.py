@@ -49,38 +49,6 @@ def fetch_pgs_file_url(pgs_id: str, genome_build: str) -> str | None:
         return None
 
 
-def stream_pgs_file(url: str):
-    """
-    Stream a gzipped PGS file from a URL into an in-memory BytesIO object.
-
-    Args:
-        url: Direct URL to a .txt.gz file.
-
-    Returns:
-        io.BytesIO with the file content, or None on error.
-    """
-    import io
-    try:
-        with requests.get(url, stream=True, timeout=120) as r:
-            r.raise_for_status()
-            buf = io.BytesIO()
-            total = int(r.headers.get("content-length", 0))
-            downloaded = 0
-            prog = st.progress(0, text="Downloading PGS file…")
-            for chunk in r.iter_content(chunk_size=1 << 16):
-                buf.write(chunk)
-                downloaded += len(chunk)
-                if total:
-                    prog.progress(min(downloaded / total, 1.0),
-                                  text=f"Downloading… {downloaded // 1024:,} KB / {total // 1024:,} KB")
-            prog.empty()
-            buf.seek(0)
-            return buf
-    except Exception as e:
-        st.error(f"❌ Failed to download PGS file: {e}")
-        return None
-
-
 def clear_ld_cache() -> int:
     """Delete all files in the LD cache directory. Returns count deleted."""
     pattern = os.path.join(constants.LD_CACHE_DIR, "*.txt")
@@ -130,11 +98,11 @@ st.set_page_config(
 )
 st.title("🧬 PGS Grep")
 st.markdown(
-    "PGS Grep is a utility for searching SNPs within Polygenic Score (PGS) files from the PGS Catalog (https://www.pgscatalog.org/). " \
+    "PGS Grep is a utility for searching SNPs within Polygenic Score (PGS) files from the [PGS Catalog](https://www.pgscatalog.org/). " \
     "It helps users locate variant information across PGS datasets and recover " 
     "related results using linkage equilibrium (LD) data from the "
-    "([1000 Genome project](https://www.internationalgenome.org/)). " \
-    "This LD information is fetched from the public ([LDlink API](https://ldlink.nih.gov/apiaccess))."
+    "[1000 Genome project](https://www.internationalgenome.org/). " \
+    "This LD information is fetched from the public [LDlink API](https://ldlink.nih.gov/apiaccess)."
 )
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────

@@ -1,7 +1,5 @@
 
 # TODO: Option to filter only for LD Proxies (checkbox in sidebar)
-# TODO: Debug (delete) MyVariant.info API.
-# TODO: make requirements.txt
 # TODO: Allow user to check button to only see proxies.
 # TODO: Add option to use D' and/or R^2. above the configuration bar
 # TODO: Make sure README is accurate. Help message for setup LD API token, user side / release public
@@ -12,9 +10,8 @@
 # TODO: Read through, check test suite. Testing suite: make sure this works for all harmonized formats including edge cases (missing columns, missing rsIDs, etc.)
 # TODO: UI/UX as in notes, test interactions to make sure it won't crash with spam. Ease of use, little question marks everywhere
 # TODO: Figure out chromosome 23 handling (X/Y/MT) in LDlink and harmonized PGS files.  LDlink uses 23 for X, 24 for Y, 25 for MT.  Harmonized PGS files use chr_name = "X", "Y", "MT".  Need to map these correctly in the scan.
-# TODO: Update & Check test suite. Test README file instructions, edit & revise README.
+# TODO: Update & Check test suite. Test README file instructions, edit & revise README. Update requirements.txt if necessary
 # TODO: Make this more efficient. Better clear cache button
-# TODO: Clone into public repo with deleted branch history to remove API token from history
 
 import gzip
 import io

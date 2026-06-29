@@ -1,0 +1,18 @@
+[theme]
+# Choose the base theme: "light" or "dark"
+base = "light"
+
+# The primary color for interactive elements (sliders, buttons, etc.)
+primaryColor = "#6c6f71"
+
+# The background color for the main page
+backgroundColor = "#FFFFFF"
+
+# The background color for sidebars and widgets (e.g., dropdowns, inputs)
+secondaryBackgroundColor = "#F0F2F6"
+
+# The default text color for your app
+textColor = "#262730"
+
+# The font family: "sans serif", "serif", or "monospace"
+font = "sans serif"
