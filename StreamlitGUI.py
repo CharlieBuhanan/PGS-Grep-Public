@@ -63,13 +63,18 @@ def clear_ld_cache() -> int:
 
 def render_metadata_card(metadata: dict) -> None:
     """Render a compact info card for PGS file metadata in the Streamlit UI."""
-    pgs_id   = metadata.get("pgs_id",      metadata.get("PGS ID",       "N/A"))
+    pgs_id   = metadata.get("pgs_id",      "N/A")
     name     = metadata.get("pgs_name",    metadata.get("trait_mapped",  "N/A"))
     trait    = metadata.get("trait_efo",   metadata.get("trait_efo_id",  "N/A"))
-    build    = metadata.get("genome_build",metadata.get("HmPOS_build",   "N/A"))
-    citation = metadata.get("citation",    metadata.get("Citation",       "N/A"))
-    pgp_id   = metadata.get("pgp_id",      metadata.get("PGP ID",        "N/A"))
-    license_ = metadata.get("license",     metadata.get("License",        "N/A"))
+    # Prefer the harmonized build (hmpos_build) it reflects the actual
+    # coordinates in this file (hm_chr/hm_pos). The legacy 'genome_build'
+    # field instead records the original study's assembly, which is
+    # often GRCh37 even in a file harmonized to GRCh38, so it must only
+    # be used as a fallback when hmpos_build is absent (e.g. older V1 files).
+    build    = metadata.get("hmpos_build", metadata.get("genome_build",  "N/A"))
+    citation = metadata.get("citation",    "N/A")
+    pgp_id   = metadata.get("pgp_id",      "N/A")
+    license_ = metadata.get("license",     "N/A")
     accessed = metadata.get("date_accessed", date.today().isoformat())
 
     st.markdown(
