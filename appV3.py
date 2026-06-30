@@ -128,13 +128,16 @@ def extract_pgs_metadata(file_object) -> dict:
         for raw_line in f:
             line = raw_line.rstrip("\n")
             if not line.startswith("#"):
-                break  # comment block is over
-            # Strip leading '#' and optional whitespace
+                break 
+            
             content = line.lstrip("#").strip()
             if "=" in content:
                 key, _, value = content.partition("=")
-                metadata[key.strip()] = value.strip()
-
+                
+                # FIX: Lowercase, remove spaces, and strip formatting tags
+                clean_key = key.strip().lower().replace(" ", "_")
+                metadata[clean_key] = value.strip()
+                
     metadata["date_accessed"] = date.today().isoformat()
     return metadata
 
@@ -175,12 +178,13 @@ def build_output_header(
         "# PGS: Scan Output",
         "#",
         "# === Source File Metadata ===",
-        f"# PGS ID: {metadata.get('pgs_id', metadata.get('PGS ID', 'Not found'))}",
-        f"# PGS Name: {metadata.get('pgs_name', metadata.get('trait_mapped', 'Not found'))}",
-        f"# Trait (EFO): {metadata.get('trait_efo', metadata.get('trait_efo_id', 'Not found'))}",
-        f"# Genome Build: {metadata.get('HmPOS_build', metadata.get('genome_build', 'Not found'))}",
-        f"# Original Author: {metadata.get('citation', metadata.get('Citation', 'Not found'))}",
-        f"# Publication: {metadata.get('pgp_id', metadata.get('PGP ID', 'Not found'))}",
+        f"# PGS ID: {metadata.get('pgs_id', 'Not found')}",
+        f"# PGS Name: {metadata.get('pgs_name', 'Not found')}",
+        f"# Clinical Trait: {metadata.get('trait_mapped', metadata.get('reported_trait', 'Not found'))}", # Explicit separate mapping
+        f"# Trait (EFO): {metadata.get('trait_efo', 'N/A for legacy V1 files')}",
+        f"# Genome Build: {metadata.get('hmpos_build', metadata.get('genome_build', 'Not found'))}", 
+        f"# Original Author: {metadata.get('citation', 'Not found')}",
+        f"# Publication: {metadata.get('pgp_id', 'Not found')}",
         f"# License: {metadata.get('license', 'Not found')}",
         f"# Date Accessed: {metadata.get('date_accessed', 'N/A')}",
         "#",
