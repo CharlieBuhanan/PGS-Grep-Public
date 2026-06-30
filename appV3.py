@@ -154,32 +154,32 @@ def build_output_header(
     """
     # Build human-readable LD filter description
     if r2_threshold is not None and dprime_threshold is not None:
-        ld_filter_str = f"R² ≥ {r2_threshold} AND D′ ≥ {dprime_threshold}"
+        ld_filter_str = f"r^2 ≥ {r2_threshold} AND D' ≥ {dprime_threshold}"
     elif r2_threshold is not None:
-        ld_filter_str = f"R² ≥ {r2_threshold}"
+        ld_filter_str = f"r^2 ≥ {r2_threshold}"
     elif dprime_threshold is not None:
-        ld_filter_str = f"D′ ≥ {dprime_threshold}"
+        ld_filter_str = f"D' ≥ {dprime_threshold}"
     else:
         ld_filter_str = "None"
 
     lines = [
-        "# LD-Aware PGS Grepper — Scan Output",
+        "# PGS: Scan Output",
         "#",
         "# === Source File Metadata ===",
-        f"# PGS ID           : {metadata.get('pgs_id', metadata.get('PGS ID', 'N/A'))}",
-        f"# PGS Name         : {metadata.get('pgs_name', metadata.get('trait_mapped', 'N/A'))}",
-        f"# Trait (EFO)      : {metadata.get('trait_efo', metadata.get('trait_efo_id', 'N/A'))}",
-        f"# Genome Build     : {metadata.get('genome_build', metadata.get('HmPOS_build', genome_build))}",
-        f"# Original Author  : {metadata.get('citation', metadata.get('Citation', 'N/A'))}",
-        f"# Publication      : {metadata.get('pgp_id', metadata.get('PGP ID', 'N/A'))}",
-        f"# License           : {metadata.get('license', 'N/A')}",
-        f"# Date Accessed    : {metadata.get('date_accessed', 'N/A')}",
+        f"# PGS ID: {metadata.get('pgs_id', metadata.get('PGS ID', 'N/A'))}",
+        f"# PGS Name: {metadata.get('pgs_name', metadata.get('trait_mapped', 'N/A'))}",
+        f"# Trait (EFO): {metadata.get('trait_efo', metadata.get('trait_efo_id', 'N/A'))}",
+        f"# Genome Build: {metadata.get('genome_build', metadata.get('HmPOS_build', genome_build))}",
+        f"# Original Author: {metadata.get('citation', metadata.get('Citation', 'N/A'))}",
+        f"# Publication: {metadata.get('pgp_id', metadata.get('PGP ID', 'N/A'))}",
+        f"# License: {metadata.get('license', 'N/A')}",
+        f"# Date Accessed: {metadata.get('date_accessed', 'N/A')}",
         "#",
         "# === Query Parameters ===",
-        f"# Target rsID      : {target_rsid}",
-        f"# LD Population    : {population}",
-        f"# Genome Assembly  : {genome_build}",
-        f"# LD Filter        : {ld_filter_str}",
+        f"# Target rsID: {target_rsid}",
+        f"# LD Population: {population}",
+        f"# Genome Assembly: {genome_build}",
+        f"# LD Filter: {ld_filter_str}",
         "#",
     ]
     return "\n".join(lines) + "\n"

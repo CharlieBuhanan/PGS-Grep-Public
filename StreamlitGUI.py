@@ -174,9 +174,6 @@ start_window = target_pos - window_size
 end_window   = target_pos + window_size
 st.sidebar.caption(f"Search window: Chr{chromosome}:{start_window:,} - {end_window:,}")
 
-# TODO: Option to filter only for LD Proxies (checkbox in sidebar)
-# TODO: Allow user to check button to only see proxies.
-st.sidebar.subheader("🔎 Result Filters")
 proxies_only = st.sidebar.checkbox(
     "Show proxy matches only",
     value=False,
