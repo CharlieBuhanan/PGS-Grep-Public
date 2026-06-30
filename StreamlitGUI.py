@@ -257,11 +257,12 @@ cache_path = os.path.join(
     constants.LD_CACHE_DIR,
     f"LD{target_rsid_input}_{population}_{genome_build.replace(' ', '_')}.txt",
 )
+LD_cache_tooltip = "If present, the app can skip repeated calls to the LDlink API."
 with cache_placeholder.container():
     if os.path.exists(cache_path):
-        st.caption(f"LD cache found for **{target_rsid_input}** ({population}, {genome_build})")
+        st.caption(f"LD cache found for **{target_rsid_input}** ({population}, {genome_build})", help = LD_cache_tooltip)
     else:
-        st.caption(f"No LD cache found at `{cache_path}`: will query LDlink API on scan.")
+        st.caption(f"No LD cache found at `{cache_path}`: will query LDlink API on scan.", help = LD_cache_tooltip)
 
 
 # ─── Scan execution ───────────────────────────────────────────────────────────
