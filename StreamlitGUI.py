@@ -350,17 +350,16 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
     if not results_df.empty:
         st.subheader("📋 Data Viewer")
 
-        # ── TODO: Allow user to check button to only see proxies ─────────
         # Apply the proxies_only sidebar filter before rendering the table.
         display_df = results_df.copy()
         if proxies_only:
-            display_df = display_df[display_df["Match_Status"].str.contains("PROXY", na=False)]
+            display_df = display_df[display_df["Match_Status"].str.contains("PROXY|EXACT", na=False)]
             if display_df.empty:
-                st.info("No proxy-matched variants in this window. Uncheck **'Show proxy matches only'** to see all results.")
+                st.info("No proxy-matched variants in this window.")
             else:
                 st.caption(
                     f"Showing {len(display_df)} proxy-matched variant(s) out of "
-                    f"{len(results_df)} total in window. Uncheck **'Show proxy matches only'** in the sidebar to see all."
+                    f"{len(results_df)} total in window."
                 )
 
         def highlight_status(val):

@@ -1,13 +1,12 @@
 # TODO: GUI GUI GUI GUI GUI UI UX
 # TODO: Some Test-Driven Development!
 
-# UI/UX Changes: (only modify StreamlitGUI.py for now). First answer these questions, the complete the tasks below and respond with any brief questions/comments. Isn't there a way to count the total lines in the window size and then make the loading bar move a percentage of that every 100 lines scanned or so? Just keep an iterator?
+# Back End Changes: (modify AppV3.py). 
 # Figure out chromosome 23 handling (X/Y/MT) in LDlink and harmonized PGS files.  LDlink uses 23 for X, 24 for Y, 25 for MT.  Harmonized PGS files use chr_name = "X", "Y", "MT".  Need to map these correctly in the scan, does it work already?
 # Be brief with your explanations/suggestions to me. Add any suggestions for GUI ease of use.
 # TASKS:
-# Make loading bar load accurately to the work being done. Do this by using the current SNP position 
-# Change 'proxy matches only' to include actual variant too (we just didn't want to see unlinked variants). Change check mark to "exclude unlinked variants", set it checked by default. Tooltip should say "Hide variants in window that do not reach R² and D′ thresholds."
-# UI: make the end result replace everything other things on the screen. (Ex: replace the repeated metadata info, and cache found messages)
+# Make loading bar load accurately to the work being done. Do this by using the current SNP position and using it to determine the percentage of the search window being scanned.
+# Change 'proxy matches only' to include actual variant too (we just didn't want to see unlinked variants). 
 # We want the user to focus on this end result and not have to scroll down. Cache the result file to not repeat scans. Each new result file replaces the old one in cache. Users should be able to press undo or reload button and last result will show. It will clear and standard messages will be shown when 
 # Attempt to move configuration settings to right side of screen. Use columns for page layout here. Make a boolean constant at the top of StreamlitGUI.py that allows dev to switch configuration panel to right/left side.
 # Different font. Change some button colors. Some more light blues #f0f4ff.
