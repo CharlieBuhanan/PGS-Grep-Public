@@ -141,7 +141,7 @@ if use_dprime:
 st.sidebar.subheader("🎯 Target Variant", help = "This tool **searches by chromosomal position**, not by rsID. "
         "You can look up the position of a variant at https://www.ncbi.nlm.nih.gov/gdv.")
 target_rsid_input = st.sidebar.text_input(
-    "Target rsID",
+    "Target rsID (must match search position)",
     value="rs10305420",
     help="This must be within the genomic window you specify below. Used to query the LDLink API.",
 )

@@ -1,15 +1,19 @@
 # TODO: GUI GUI GUI GUI GUI UI UX
+# TODO: Some Test-Driven Development!
 
-# TODO: Fix claude slight bugs. Loading bar accurate. Incorrect lines read for loading bar. Change 'proxy matches only' to include actual variant too.
-# TODO: UI: make the end result replace everything else on the screen. Change some button colors.
-# TODO: tooltip for LD Cache. Attempt to move configuration settings to right side of screen. Different font. 
-# Main title chunked rather than long single line. Image somewhere! Some more light blues.
+# Change the GUI (only change StreamlitGUI.py right now) to reflect these changes as best as possible. But first answer this: isn't there a way to count the total lines in the window size and then make the loading bar move a percentage of that every 100 lines scanned or so? Just keep an iterator?
+# Figure out chromosome 23 handling (X/Y/MT) in LDlink and harmonized PGS files.  LDlink uses 23 for X, 24 for Y, 25 for MT.  Harmonized PGS files use chr_name = "X", "Y", "MT".  Need to map these correctly in the scan, does it work already?
+# Loading bar inaccurate (make it load accurately to the work being done).
+# Change 'proxy matches only' to include actual variant too (we just didn't want to see unlinked variants). Change check mark to "exclude unlinked variants", set it checked by default. Tooltip should say "Hide variants in window that do not reach R² and D′ thresholds."
+# UI: make the end result replace everything other things on the screen. (Ex: replace the repeated metadata info)
+# Attempt to move configuration settings to right side of screen. Different font. 
+# Main title description chunked to the left rather than long single line. 
+# Make a list of 12 one-line edge case test scenarios.
 
+# Change some button colors. Image somewhere! Some more light blues. D' can be negative. Tooltip for LD Cache.
 # TODO: Make sure README is accurate. Help message for setup LD API token, user side / release public
-# TODO: Extend test cases
-# TODO: Read through, check test suite. Testing suite: make sure this works for all harmonized formats including edge cases (missing columns, missing rsIDs, etc.)
-# TODO: UI/UX as in notes, test interactions to make sure it won't crash with spam. Ease of use, little question marks everywhere
-# TODO: Figure out chromosome 23 handling (X/Y/MT) in LDlink and harmonized PGS files.  LDlink uses 23 for X, 24 for Y, 25 for MT.  Harmonized PGS files use chr_name = "X", "Y", "MT".  Need to map these correctly in the scan.
+# TODO: Extend test cases. Testing suite: make sure this works for all harmonized formats including edge cases (missing columns, missing rsIDs, etc.)
+# TODO: Read through all important code, check test suite. 
 # TODO: Update & Check test suite. Test README file instructions, edit & revise README. Update requirements.txt if necessary
 # TODO: Make this more efficient. Better clear cache button
 # Future: option to see all LD proxies (view cache file basically)
@@ -229,7 +233,7 @@ class PGSScanEngine:
         except ValueError:
             return ld_map
 
-        # D′ column is optional — gracefully absent in some LDlink responses
+        # D′ column is optional, gracefully absent in some LDlink responses
         try:
             dprime_idx: int | None = headers.index("Dprime")
         except ValueError:
