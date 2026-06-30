@@ -101,6 +101,21 @@ st.set_page_config(
     page_icon="🧬",
 )
 
+st.markdown("""
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <style>
+    html, body, [class*="css"] {
+        font-family: "Roboto", sans-serif;
+        font-optical-sizing: auto;
+        font-weight: 400;
+        font-style: normal;
+        font-variation-settings: "wdth" 100;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # Columns to compress title and description into smaller space
 title, right_buffer = st.columns([1,1])
 
