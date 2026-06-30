@@ -5,7 +5,7 @@
 # Figure out chromosome 23 handling (X/Y/MT) in LDlink and harmonized PGS files.  LDlink uses 23 for X, 24 for Y, 25 for MT.  Harmonized PGS files use chr_name = "X", "Y", "MT".  Need to map these correctly in the scan, does it work already?
 # Be brief with your explanations/suggestions to me. Add any suggestions for GUI ease of use.
 # TASKS:
-# Make loading bar load accurately to the work being done. (Just the front end for now, maybe no changes yet.)
+# Make loading bar load accurately to the work being done. Do this by using the current SNP position 
 # Change 'proxy matches only' to include actual variant too (we just didn't want to see unlinked variants). Change check mark to "exclude unlinked variants", set it checked by default. Tooltip should say "Hide variants in window that do not reach R² and D′ thresholds."
 # UI: make the end result replace everything other things on the screen. (Ex: replace the repeated metadata info, and cache found messages)
 # We want the user to focus on this end result and not have to scroll down. Cache the result file to not repeat scans. Each new result file replaces the old one in cache. Users should be able to press undo or reload button and last result will show. It will clear and standard messages will be shown when 

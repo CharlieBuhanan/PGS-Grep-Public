@@ -95,12 +95,16 @@ st.set_page_config(
     layout="wide",
     page_icon="🧬",
 )
-st.title("🧬 PGS Grep")
-st.markdown(
-    "PGS Grep is a utility for searching SNPs within Polygenic Score (PGS) files from the [PGS Catalog](https://www.pgscatalog.org/). " \
-    "It helps users locate variant information across PGS datasets and recover " 
-    "related results using linkage equilibrium (LD) data fetched from [LDlink API](https://ldlink.nih.gov/apiaccess)."
-)
+
+# Columns to compress title and description into smaller space
+title, right_buffer = st.columns([5,7])
+
+with title:
+    st.title("🧬 PGS Grep")
+    st.markdown(
+        "PGS Grep is a utility for searching SNPs within Polygenic Score (PGS) files from the [PGS Catalog](https://www.pgscatalog.org/). " \
+        "Locate variant information across PGS datasets and recover related results using linkage equilibrium (LD) data fetched from [LDlink API](https://ldlink.nih.gov/apiaccess)."
+    )
 st.divider()
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
@@ -112,29 +116,6 @@ token_input = st.sidebar.text_input(
     type="password",
     help="Get a free token at https://ldlink.nih.gov/apiaccess. Required for first-time queries, identical fetched results are cached for future use.",
 )
-
-# ── LD Metric selection ───────────────────────────────────────────────────────
-# TODO: Add option to use D' and/or R^2. above the configuration bar
-st.sidebar.subheader(
-    "📐 LD Metric",
-    help="Choose which linkage disequilibrium statistic(s) to use when filtering proxy variants. "
-         "R² measures the correlation between alleles; D′ measures the maximum possible LD. ")
-ld_metric = st.sidebar.radio(
-    "Filter proxies by",
-    options=["R² only", "D′ only", "R² and D′ (both must pass)"],
-    index=0,
-    horizontal=False,
-    help="Select which LD metric(s) proxies must satisfy to be included.",
-)
-
-use_r2     = ld_metric in ("R² only",              "R² and D′ (both must pass)")
-use_dprime = ld_metric in ("D′ only",              "R² and D′ (both must pass)")
-
-r2_filter = dprime_filter = None
-if use_r2:
-    r2_filter = st.sidebar.slider("R² Threshold", 0.0, 1.0, 0.7, 0.05, key="r2_slider")
-if use_dprime:
-    dprime_filter = st.sidebar.slider("D′ Threshold", 0.0, 1.0, 0.8, 0.05, key="dprime_slider")
 
 # ── Target variant ────────────────────────────────────────────────────────────
 st.sidebar.subheader("🎯 Target Variant", help = "This tool **searches by chromosomal position**, not by rsID. "
@@ -149,7 +130,7 @@ population   = st.sidebar.selectbox(
     "LD Population (1000G)", ["EUR", "AMR", "AFR", "EAS", "SAS"], index=0, help="The population group for linkage disequilibrium calculation. EUR = European, AMR = Admixed American, AFR = African, EAS = East Asian, SAS = South Asian."
 )
 
-st.sidebar.subheader("📍 Genomic Search Position", help = "The scan searches for variants and nearby LD Proxies **in this genomic window**. " \
+st.sidebar.subheader("📍 Genomic Search Window", help = "The scan searches for variants and nearby LD Proxies **in this genomic window**. " \
 "To find the position of a variant, you can look it up at https://www.ncbi.nlm.nih.gov/gdv."
 )
 
@@ -174,12 +155,32 @@ start_window = target_pos - window_size
 end_window   = target_pos + window_size
 st.sidebar.caption(f"Search window: Chr{chromosome}:{start_window:,} - {end_window:,}")
 
+# ── LD Metric selection ───────────────────────────────────────────────────────
+st.sidebar.subheader(
+    "📐 LD Metric",
+    help="Choose which linkage disequilibrium statistic(s) to use when filtering proxy variants. "
+         "R² measures the correlation between alleles; D′ measures the maximum possible LD. ")
+ld_metric = st.sidebar.radio(
+    "Filter proxies by",
+    options=["R² only", "D′ only", "R² and D′ (both must pass)"],
+    index=0,
+    horizontal=False,
+    help="Select which LD metric(s) proxies must satisfy to be included.",
+)
+
+use_r2     = ld_metric in ("R² only",              "R² and D′ (both must pass)")
+use_dprime = ld_metric in ("D′ only",              "R² and D′ (both must pass)")
+
+r2_filter = dprime_filter = None
+if use_r2:
+    r2_filter = st.sidebar.slider("R² Threshold", 0.0, 1.0, 0.7, 0.05, key="r2_slider")
+if use_dprime:
+    dprime_filter = st.sidebar.slider("D′ Threshold", 0.0, 1.0, 0.8, 0.05, key="dprime_slider")
+
 proxies_only = st.sidebar.checkbox(
-    "Show proxy matches only",
+    "Hide Unlinked Variants",
     value=False,
-    help="When checked, the results table will only show variants that were matched via LD proxy — "
-         "exact-position hits at the target coordinate are hidden. Useful when you already know the "
-         "target is absent and want to focus on linked variants.",
+    help="Hide variants in genomic window that do not reach R² and D′ thresholds.",
 )
 
 # ─── PGS File Source ──────────────────────────────────────────────────────────
