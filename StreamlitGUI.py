@@ -97,13 +97,13 @@ st.set_page_config(
 )
 
 # Columns to compress title and description into smaller space
-title, right_buffer = st.columns([5,7])
+title, right_buffer = st.columns([1,1])
 
 with title:
     st.title("🧬 PGS Grep")
     st.markdown(
         "PGS Grep is a utility for searching SNPs within Polygenic Score (PGS) files from the [PGS Catalog](https://www.pgscatalog.org/). " \
-        "Locate variant information across PGS datasets and recover related results using linkage equilibrium (LD) data fetched from [LDlink API](https://ldlink.nih.gov/apiaccess)."
+        "Locate variant information across PGS datasets and recover related results using linkage equilibrium (LD) data fetched from [LDlink API](https://ldlink.nih.gov/apiaccess). "
     )
 st.divider()
 
@@ -121,7 +121,7 @@ token_input = st.sidebar.text_input(
 st.sidebar.subheader("🎯 Target Variant", help = "This tool **searches by chromosomal position**, not by rsID. "
         "You can look up the position of a variant at https://www.ncbi.nlm.nih.gov/gdv.")
 target_rsid_input = st.sidebar.text_input(
-    "Target rsID (must match search position)",
+    "Target rsID (must match center position)",
     value="rs10305420",
     help="This must be within the genomic window you specify below. Used to query the LDLink API.",
 )
@@ -145,7 +145,7 @@ chromosome  = st.sidebar.number_input(
     value=st.session_state["resolved_chr"],
 )
 target_pos = st.sidebar.number_input(
-    "Center Position (SNP position)",
+    "Center Position (target variant position)",
     value=st.session_state["resolved_pos"],
     help="The scan searches for variants at this base-pair position and LD proxies within the specified window.",
 )
@@ -179,8 +179,9 @@ if use_dprime:
 
 proxies_only = st.sidebar.checkbox(
     "Hide Unlinked Variants",
-    value=False,
-    help="Hide variants in genomic window that do not reach R² and D′ thresholds.",
+    value=True,
+    help="Hide variants in the genomic window that are neither the exact target nor a qualifying LD proxy. "
+         "Applies to both the results table and the exported CSV.",
 )
 
 # ─── PGS File Source ──────────────────────────────────────────────────────────
@@ -232,26 +233,30 @@ elif file_to_scan is None:
 
 
 # ─── Metadata preview (shown as soon as a file is available) ─────────────────
+metadata_placeholder = st.empty()
 if file_to_scan is not None:
     try:
         preview_meta = appV3.extract_pgs_metadata(file_to_scan)
         # Reset seek position after metadata read
         if hasattr(file_to_scan, "seek"):
             file_to_scan.seek(0)
-        render_metadata_card(preview_meta)
+        with metadata_placeholder.container():
+            render_metadata_card(preview_meta)
     except Exception:
         pass  # Don't crash if metadata extraction fails on a malformed file
 
 
 # ─── Cache status indicator ───────────────────────────────────────────────────
+cache_placeholder = st.empty()
 cache_path = os.path.join(
     constants.LD_CACHE_DIR,
     f"LD{target_rsid_input}_{population}_{genome_build.replace(' ', '_')}.txt",
 )
-if os.path.exists(cache_path):
-    st.info(f"🗄️ LD cache found for **{target_rsid_input}** ({population}, {genome_build})")
-else:
-    st.caption(f"No LD cache found at `{cache_path}`: will query LDlink API on scan.")
+with cache_placeholder.container():
+    if os.path.exists(cache_path):
+        st.caption(f"LD cache found for **{target_rsid_input}** ({population}, {genome_build})")
+    else:
+        st.caption(f"No LD cache found at `{cache_path}`: will query LDlink API on scan.")
 
 
 # ─── Scan execution ───────────────────────────────────────────────────────────
@@ -259,67 +264,73 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
 
     engine = appV3.PGSScanEngine(token=token_input)
 
-    # Step 1 — LD proxies
-    with st.spinner("📡 Fetching / loading LD proxy map…"):
-        engine.fetch_ld_proxies(
-            target_rsid   = target_rsid_input,
-            genome_build  = genome_build,
-            r2_threshold  = r2_filter,
-            dprime_threshold = dprime_filter,
-            population    = population,
-        )
+    scan_status_placeholder = st.empty()
 
-    if not engine.ld_map:
-        st.warning(
-            "⚠️ No LD proxies returned above the threshold(s). "
-            "Only the exact target position will be searched."
-        )
-    else:
-        metric_desc = (
-            f"R² ≥ {r2_filter}" if use_r2 and not use_dprime
-            else f"D′ ≥ {dprime_filter}" if use_dprime and not use_r2
-            else f"R² ≥ {r2_filter} and D′ ≥ {dprime_filter}"
-        )
-        st.success(f"✅ {len(engine.ld_map)} proxy position(s) loaded ({metric_desc})")
+    with scan_status_placeholder.container():
+        # Step 1 — LD proxies
+        with st.spinner("📡 Fetching / loading LD proxy map…"):
+            engine.fetch_ld_proxies(
+                target_rsid   = target_rsid_input,
+                genome_build  = genome_build,
+                r2_threshold  = r2_filter,
+                dprime_threshold = dprime_filter,
+                population    = population,
+            )
 
-    # Step 2 — scan file with progress bar
-    # TODO: Loading bar for file scanning, update progress every 500 lines or so.
-    st.markdown("**🔍 Scanning PGS file…**")
-    progress_bar      = st.progress(0, text="Starting scan…")
-    progress_status   = st.empty()          # text slot updated alongside the bar
-
-    def on_scan_progress(lines_read: int, lines_total: int | None, variants_found: int) -> None:
-        """
-        Callback passed into engine.execute_scan() and called every ~500 lines.
-
-        Args:
-            lines_read:    Number of data lines processed so far.
-            lines_total:   Total data lines in the file, or None if unknown
-                           (e.g. streaming from an uploaded file without a pre-count).
-            variants_found: Number of matching variants found so far.
-        """
-        if lines_total:
-            fraction = min(lines_read / lines_total, 1.0)
-            pct      = int(fraction * 100)
-            progress_bar.progress(fraction, text=f"Scanning… {pct}% ({lines_read:,} / {lines_total:,} lines)")
+        if not engine.ld_map:
+            st.warning(
+                "⚠️ No LD proxies returned above the threshold(s). "
+                "Only the exact target position will be searched."
+            )
         else:
-            # File size unknown — show a pulsing indeterminate-style counter
-            pct_guess = min(lines_read / 500_000, 0.99)   # assume ~500k lines max for pulse cap
-            progress_bar.progress(pct_guess, text=f"Scanning… {lines_read:,} lines read")
-        progress_status.caption(f"Variants in window so far: **{variants_found}**")
+            metric_desc = (
+                f"R² ≥ {r2_filter}" if use_r2 and not use_dprime
+                else f"D′ ≥ {dprime_filter}" if use_dprime and not use_r2
+                else f"R² ≥ {r2_filter} and D′ ≥ {dprime_filter}"
+            )
+            st.success(f"✅ {len(engine.ld_map)} proxy position(s) loaded ({metric_desc})")
 
-    exact_match, proxy_matches, results_df = engine.execute_scan(
-        file_object      = file_to_scan,
-        chr_number       = chromosome,
-        target_pos       = target_pos,
-        start_window     = start_window,
-        end_window       = end_window,
-        target_rsid      = target_rsid_input,
-        progress_callback= on_scan_progress,
-    )
+        # Step 2 — scan file with progress bar, accurate to position within the search window
+        st.markdown("**🔍 Scanning PGS file…**")
+        progress_bar      = st.progress(0, text="Starting scan…")
+        progress_status   = st.empty()          # text slot updated alongside the bar
 
-    progress_bar.progress(1.0, text="✅ Scan complete!")
-    progress_status.empty()
+        def on_scan_progress(current_pos: int, percent_complete: float, variants_found: int) -> None:
+            """
+            Callback passed into engine.execute_scan() and called every ~500 lines.
+
+            Args:
+                current_pos:        Base-pair position of the SNP currently being read.
+                percent_complete:   Fraction (0.0-1.0) of the way through the search
+                                     window, computed as
+                                     (current_pos - start_window) / (end_window - start_window).
+                variants_found:      Number of matching variants found so far.
+            """
+            pct = int(percent_complete * 100)
+            progress_bar.progress(
+                percent_complete,
+                text=f"Scanning… {pct}% (position {current_pos:,} of window Chr{chromosome}:{start_window:,}-{end_window:,})",
+            )
+            progress_status.caption(f"Variants in window so far: **{variants_found}**")
+
+        exact_match, proxy_matches, results_df = engine.execute_scan(
+            file_object      = file_to_scan,
+            chr_number       = chromosome,
+            target_pos       = target_pos,
+            start_window     = start_window,
+            end_window       = end_window,
+            target_rsid      = target_rsid_input,
+            progress_callback= on_scan_progress,
+        )
+
+        progress_bar.progress(1.0, text="✅ Scan complete!")
+
+    # ── Clear all "in-progress" content so the final result replaces it ────
+    # The user shouldn't have to scroll past repeated metadata cards, cache
+    # messages, or scan-status chatter to see the outcome.
+    metadata_placeholder.empty()
+    cache_placeholder.empty()
+    scan_status_placeholder.empty()
 
     # ── Metadata card (from scanned file header) ──────────────────────────
     st.subheader("📄 Source File Data")
@@ -330,11 +341,27 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
 
     if exact_match:
         st.balloons()
-        st.success(f"✅ **Exact match:** `{target_rsid_input}` found directly at Chr{chromosome}:{target_pos:,}.")
+        st.markdown(
+            f"""
+            <div style="background:#d4edda;border:2px solid #28a745;border-radius:8px;
+                        padding:16px 20px;margin-bottom:12px;font-size:1.15rem;
+                        font-weight:700;color:#155724;text-align:center;">
+              ✅ EXACT MATCH FOUND — {target_rsid_input} at Chr{chromosome}:{target_pos:,}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     elif proxy_matches:
-        st.info(
-            f"🔮 **Proxy match:** Target absent at Chr{chromosome}:{target_pos:,}, but "
-            f"**{len(proxy_matches)}** LD-linked proxy variant(s) found in the window."
+        st.markdown(
+            f"""
+            <div style="background:#cce5ff;border:2px solid #004085;border-radius:8px;
+                        padding:16px 20px;margin-bottom:12px;font-size:1.1rem;
+                        font-weight:700;color:#004085;text-align:center;">
+              🔮 PROXY MATCH — target absent at Chr{chromosome}:{target_pos:,}, but
+              {len(proxy_matches)} LD-linked proxy variant(s) found in the window.
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
     else:
         st.error(
@@ -349,15 +376,21 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
     if not results_df.empty:
         st.subheader("📋 Data Viewer")
 
-        # Apply the proxies_only sidebar filter before rendering the table.
-        display_df = results_df.copy()
+        # Apply the "Hide Unlinked Variants" sidebar filter. This now drives
+        # BOTH the on-screen table and the exported CSV, so unlinked variants
+        # never appear anywhere when the box is checked (the default).
         if proxies_only:
-            display_df = display_df[display_df["Match_Status"].str.contains("PROXY|EXACT", na=False)]
+            export_df  = results_df[results_df["Match_Status"].str.contains("PROXY|EXACT", na=False)]
+        else:
+            export_df  = results_df
+
+        display_df = export_df.copy()
+        if proxies_only:
             if display_df.empty:
-                st.info("No proxy-matched variants in this window.")
+                st.info("No exact-match or proxy-matched variants in this window.")
             else:
                 st.caption(
-                    f"Showing {len(display_df)} proxy-matched variant(s) out of "
+                    f"Showing {len(display_df)} matched variant(s) (unlinked variants hidden) out of "
                     f"{len(results_df)} total in window."
                 )
 
@@ -374,9 +407,10 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
             styled = display_df.style.map(highlight_status, subset=["Match_Status"])
             st.dataframe(styled, width='stretch', hide_index=True)
 
-        # Build output CSV with metadata header comments
-        # Note: export always uses the full results_df regardless of the proxy filter,
-        # so the user gets a complete record. The filter is a view-only convenience.
+        # Build output CSV with metadata header comments.
+        # The CSV now respects the same "Hide Unlinked Variants" filter as the
+        # table above, so unlinked variants are excluded from the file too
+        # when the box is checked.
         header_comments = appV3.build_output_header(
             metadata      = engine.last_metadata,
             target_rsid   = target_rsid_input,
@@ -385,7 +419,7 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
             r2_threshold  = r2_filter,
             dprime_threshold = dprime_filter,
         )
-        csv_data   = results_df.to_csv(index=False)
+        csv_data   = export_df.to_csv(index=False)
         csv_bytes  = (header_comments + csv_data).encode("utf-8")
 
         st.download_button(

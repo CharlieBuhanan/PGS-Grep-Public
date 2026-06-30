@@ -178,7 +178,7 @@ def build_output_header(
         f"# PGS ID: {metadata.get('pgs_id', metadata.get('PGS ID', 'Not found'))}",
         f"# PGS Name: {metadata.get('pgs_name', metadata.get('trait_mapped', 'Not found'))}",
         f"# Trait (EFO): {metadata.get('trait_efo', metadata.get('trait_efo_id', 'Not found'))}",
-        f"# Genome Build: {metadata.get('genome_build', metadata.get('HmPOS_build', 'Not found'))}",
+        f"# Genome Build: {metadata.get('HmPOS_build', metadata.get('genome_build', 'Not found'))}",
         f"# Original Author: {metadata.get('citation', metadata.get('Citation', 'Not found'))}",
         f"# Publication: {metadata.get('pgp_id', metadata.get('PGP ID', 'Not found'))}",
         f"# License: {metadata.get('license', 'Not found')}",
