@@ -77,7 +77,6 @@ def render_metadata_card(metadata: dict) -> None:
         <div style="background:#f0f4ff;border-left:4px solid #4a7cdc;
                     border-radius:6px;padding:12px 16px;margin-bottom:12px;
                     font-size:0.88rem;line-height:1.7;">
-          <b>📄 PGS File Metadata</b><br>
           <b>PGS ID:</b> {pgs_id} &nbsp;|&nbsp; <b>Publication:</b> {pgp_id}<br>
           <b>Name / Trait:</b> {name}<br>
           <b>Trait EFO:</b> {trait} &nbsp;|&nbsp; <b>Build:</b> {build}<br>
