@@ -1,18 +1,6 @@
 # TODO: GUI GUI GUI GUI GUI UI UX
 # TODO: Some Test-Driven Development!
 
-# Back End Changes: (modify AppV3.py). 
-# Figure out chromosome 23 handling (X/Y/MT) in LDlink and harmonized PGS files.  LDlink uses 23 for X, 24 for Y, 25 for MT.  Harmonized PGS files use chr_name = "X", "Y", "MT".  Need to map these correctly in the scan, does it work already?
-# Be brief with your explanations/suggestions to me. Add any suggestions for GUI ease of use.
-# TASKS:
-# Make loading bar load accurately to the work being done. Do this by using the current SNP position and using it to determine the percentage of the search window being scanned.
-# Change 'proxy matches only' to include actual variant too (we just didn't want to see unlinked variants). 
-# We want the user to focus on this end result and not have to scroll down. Cache the result file to not repeat scans. Each new result file replaces the old one in cache. Users should be able to press undo or reload button and last result will show. It will clear and standard messages will be shown when 
-# Attempt to move configuration settings to right side of screen. Use columns for page layout here. Make a boolean constant at the top of StreamlitGUI.py that allows dev to switch configuration panel to right/left side.
-# Different font. Change some button colors. Some more light blues #f0f4ff.
-# Main title description should be chunked to the left rather than long single line. 
-
-
 # Make a list of 12 one-line edge case test scenarios.
 # Change some button colors. Image somewhere! Some more light blues. D' can be negative. Tooltip for LD Cache.
 # TODO: Make sure README is accurate. Help message for setup LD API token, user side / release public
@@ -31,6 +19,28 @@ import streamlit as st # type: ignore
 import pandas as pd # type: ignore
 import requests # type: ignore
 import constants
+
+# LDlink uses numeric codes 23/24/25 for X/Y/MT; harmonized PGS files use letters.
+LDLINK_SEX_MT_CODES: Final[dict[str, str]] = {"23": "X", "24": "Y", "25": "MT"}
+PGS_SEX_MT_CODES: Final[dict[str, str]] = {"X": "23", "Y": "24", "MT": "25"}
+
+
+def normalize_chr(chr_value: str) -> str:
+    """
+    Normalize a chromosome value to PGS harmonized notation (1-22, X, Y, MT).
+
+    Accepts either LDlink-style numeric codes (23/24/25) or PGS-style letters
+    (X/Y/MT, case-insensitive), as well as plain autosomes. Strips a leading
+    'chr' prefix if present.
+    """
+    c = str(chr_value).strip().replace("chr", "").replace("Chr", "")
+    upper = c.upper()
+    if upper in ("X", "Y", "MT"):
+        return upper
+    if c in LDLINK_SEX_MT_CODES:
+        return LDLINK_SEX_MT_CODES[c]
+    return c
+
 
 # Canonical output columns (always emitted in this order)
 OUTPUT_COLS: Final[list[str]] = [
@@ -165,13 +175,13 @@ def build_output_header(
         "# PGS: Scan Output",
         "#",
         "# === Source File Metadata ===",
-        f"# PGS ID: {metadata.get('pgs_id', metadata.get('PGS ID', 'N/A'))}",
-        f"# PGS Name: {metadata.get('pgs_name', metadata.get('trait_mapped', 'N/A'))}",
-        f"# Trait (EFO): {metadata.get('trait_efo', metadata.get('trait_efo_id', 'N/A'))}",
-        f"# Genome Build: {metadata.get('genome_build', metadata.get('HmPOS_build', genome_build))}",
-        f"# Original Author: {metadata.get('citation', metadata.get('Citation', 'N/A'))}",
-        f"# Publication: {metadata.get('pgp_id', metadata.get('PGP ID', 'N/A'))}",
-        f"# License: {metadata.get('license', 'N/A')}",
+        f"# PGS ID: {metadata.get('pgs_id', metadata.get('PGS ID', 'Not found'))}",
+        f"# PGS Name: {metadata.get('pgs_name', metadata.get('trait_mapped', 'Not found'))}",
+        f"# Trait (EFO): {metadata.get('trait_efo', metadata.get('trait_efo_id', 'Not found'))}",
+        f"# Genome Build: {metadata.get('genome_build', metadata.get('HmPOS_build', 'Not found'))}",
+        f"# Original Author: {metadata.get('citation', metadata.get('Citation', 'Not found'))}",
+        f"# Publication: {metadata.get('pgp_id', metadata.get('PGP ID', 'Not found'))}",
+        f"# License: {metadata.get('license', 'Not found')}",
         f"# Date Accessed: {metadata.get('date_accessed', 'N/A')}",
         "#",
         "# === Query Parameters ===",
@@ -372,10 +382,13 @@ class PGSScanEngine:
             start_window:       Start of the genomic search window.
             end_window:         End of the genomic search window.
             target_rsid:        rsID of the target variant (used as fallback label).
-            progress_callback:  Optional callable(lines_read, lines_total, variants_found).
-                                Called every PROGRESS_INTERVAL data lines.
-                                lines_total is None because gzipped files cannot be
-                                cheaply pre-counted without a full decompression pass.
+            progress_callback:  Optional callable(current_pos, percent_complete, variants_found).
+                                Called every PROGRESS_INTERVAL data lines on the
+                                target chromosome. percent_complete is the SNP's
+                                fractional position within [start_window, end_window],
+                                clamped to [0.0, 1.0], so the bar reflects how far
+                                through the search window the scan actually is
+                                rather than how many lines have been read.
         """
         PROGRESS_INTERVAL = 500
 
@@ -383,7 +396,7 @@ class PGSScanEngine:
         proxy_matches:  list = []
         rows_processed: list = []
         lines_read:     int  = 0
-        target_chr_str = str(chr_number).replace("chr", "")
+        target_chr_str = normalize_chr(chr_number)
 
         # Extract metadata before scanning (resets seek position internally)
         self.last_metadata = extract_pgs_metadata(file_object)
@@ -423,17 +436,13 @@ class PGSScanEngine:
 
                 lines_read += 1
 
-                # Fire progress callback every PROGRESS_INTERVAL data lines
-                if progress_callback and lines_read % PROGRESS_INTERVAL == 0:
-                    progress_callback(lines_read, None, len(rows_processed))
-
                 def safe_get(idx, default="N/A"):
                     if idx is None or idx >= len(columns):
                         return default
                     v = columns[idx].strip()
                     return v if v not in ("", ".", "NA", "nan", "NaN", "Null") else default
 
-                c_name = safe_get(col_map["chr"], "").replace("chr", "")
+                c_name = normalize_chr(safe_get(col_map["chr"], ""))
                 c_pos  = safe_get(col_map["pos"], "")
 
                 try:
@@ -443,6 +452,16 @@ class PGSScanEngine:
 
                 if c_name != target_chr_str:
                     continue
+
+                if progress_callback and lines_read % PROGRESS_INTERVAL == 0:
+                    window_span = end_window - start_window
+                    if window_span > 0:
+                        pct = (current_pos - start_window) / window_span
+                    else:
+                        pct = 1.0
+                    pct = max(0.0, min(1.0, pct))
+                    progress_callback(current_pos, pct, len(rows_processed))
+
                 if not (start_window <= current_pos <= end_window):
                     continue
 
@@ -485,7 +504,7 @@ class PGSScanEngine:
 
         # Final callback so the GUI always reaches 100 %
         if progress_callback:
-            progress_callback(lines_read, None, len(rows_processed))
+            progress_callback(end_window, 1.0, len(rows_processed))
 
         df = pd.DataFrame(rows_processed, columns=OUTPUT_COLS) if rows_processed else pd.DataFrame(columns=OUTPUT_COLS)
         return exact_match, proxy_matches, df

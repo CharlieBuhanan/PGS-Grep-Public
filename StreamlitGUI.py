@@ -342,10 +342,9 @@ if file_to_scan and st.button("🚀 Execute Genomic Scan", type="primary"):
             "nor any qualifying proxies were found in this window."
         )
 
-    m1, m2, m3 = st.columns(3)
+    m1, m2, buffer = st.columns([1,1,3])
     m1.metric("Exact Position Match", "Yes" if exact_match else "No")
     m2.metric("LD Proxies Captured",  len(proxy_matches))
-    m3.metric("Variants in Window",   len(results_df))
 
     if not results_df.empty:
         st.subheader("📋 Data Viewer")

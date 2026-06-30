@@ -3,7 +3,7 @@
 base = "light"
 
 # The primary color for interactive elements (sliders, buttons, etc.)
-primaryColor = "#6c6f71"
+primaryColor = "#004085"
 
 # The background color for the main page
 backgroundColor = "#FFFFFF"
