@@ -268,7 +268,7 @@ init_session_state()
 
 st.title("🧬 PGS Grep")
 st.caption(
-    "A step-by-step wizard for locating a single SNP RSID (and its LD proxies) "
+    "A step-by-step application for locating a single SNP RSID (and its LD proxies) "
     "inside a Polygenic Score (PGS) file."
 )
 render_progress_indicator()
@@ -293,17 +293,16 @@ def render_step1_welcome() -> None:
         "[LDlink API](https://ldlink.nih.gov/apiaccess)."
     )
 
-    st.subheader("Before you start, have these ready:")
+    st.subheader("Before you start, consider gathering:")
     st.markdown(
         """
-- 📁 A **PGS file** (or its PGS Catalog / publication ID)
-- A **target SNP RSID** you want to locate
-- A **genomic search window** (how far to search around the target)
-- An **LDLink API Token** *(optional — only needed if you want LD Proxies)*
+- A **target SNP RSID** (ex: rs10305420) that you want to locate
+- 📁 A Polygenic Score (PGS) file (or its PGS Catalog / publication ID)
+- Optional: [LDLink API Token](https://ldlink.nih.gov/apiaccess) *(only if you want to consider Linkage Disequilibrium in your results)*
         """
     )
 
-    st.info("Nothing here is destructive — you can go back and change any answer later.")
+    st.info("The next steps will guide you through finding a suitable PGS file, configuring the search, and finding an LDLink Token if necessary.")
 
     st.write("")
     if st.button("Get Started", type="primary", width='stretch'):
@@ -441,7 +440,7 @@ def render_step3_rsid_guide() -> None:
    Coordinates differ between assemblies, so using the wrong one will point you
    to the wrong position.
 4. Note down the **chromosome number** and **base-pair position** shown for
-   that assembly — you'll enter both in the next steps.
+   that assembly. You'll need this when setting the search window.
         """
     )
 
@@ -479,17 +478,14 @@ def render_step4_ld_choice() -> None:
         """
 **LD proxies** are nearby SNPs that tend to be inherited together with your
 target SNP (they're in *linkage disequilibrium*). If your exact target SNP
-isn't in the PGS file, a proxy can act as a stand-in — capturing much of the
-same genetic signal.
-
-- **Yes** — also search for LD proxies (requires a free LDLink API token)
-- **No** — just search for the exact target position
+isn't in the PGS file, a proxy can act as a stand-in that captures a
+similar genetic signal.
         """
     )
 
     st.session_state["want_ld_proxies"] = st.radio(
         "Would you like to search for LD Proxies?",
-        ["No — scan target position only", "Yes — also search LD proxies"],
+        ["No, scan target position only", "Yes, also search LD proxies (requires a free token)"],
         index=0 if st.session_state["want_ld_proxies"].startswith("No") else 1,
     )
 
@@ -519,7 +515,7 @@ def render_step4_5_ld_auth() -> None:
         "LD proxy lookups are powered by the **LDlink API**, which requires a "
         "free personal access token."
     )
-    st.markdown("[Get a free token here](https://ldlink.nih.gov/apiaccess)")
+    st.markdown("[Get a free token here (ldlink.nih.gov)](https://ldlink.nih.gov/apiaccess)")
 
     st.session_state["ldlink_token"] = st.text_input(
         "LDLink API Token",
