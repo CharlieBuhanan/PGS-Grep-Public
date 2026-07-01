@@ -481,17 +481,17 @@ class PGSScanEngine:
                 weight = safe_get(col_map.get("weight"), "0.0")
 
                 if current_pos == target_pos:
-                    status_flag = "🎯 EXACT TARGET MATCH"
+                    status_flag = "EXACT TARGET MATCH"
                     exact_match = True
                 elif current_pos in self.ld_map:
                     p = self.ld_map[current_pos]
                     # Include D′ in the label when it was fetched
                     if p.get("dprime") is not None:
                         status_flag = (
-                            f"🔗 LD PROXY ({p['rsid']}, r²={p['r2']:.3f}, D′={p['dprime']:.3f})"
+                            f"LD PROXY ({p['rsid']}, r²={p['r2']:.3f}, D′={p['dprime']:.3f})"
                         )
                     else:
-                        status_flag = f"🔗 LD PROXY ({p['rsid']}, r²={p['r2']:.3f})"
+                        status_flag = f"LD PROXY ({p['rsid']}, r²={p['r2']:.3f})"
                     proxy_matches.append((current_pos, p["rsid"], p["r2"], weight))
                 else:
                     status_flag = "Unlinked Region Variant"
