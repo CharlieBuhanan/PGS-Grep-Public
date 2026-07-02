@@ -132,7 +132,7 @@ def init_session_state() -> None:
         "pgs_file_signature": None,
         "preview_metadata": None,
         # Step 3 / 3.5 — LD proxies
-        "want_ld_proxies": "No — scan target position only",
+        "want_ld_proxies": "No, scan target position only",
         "ldlink_token": "",
         # Step 4 — search configuration
         "target_rsid": "rs10305420",
@@ -181,10 +181,16 @@ def go_to_prev_step() -> None:
 
 def render_progress_indicator() -> None:
     """Draw a slim progress bar + 'Step X of Y' caption at the top of the wizard."""
-    steps = active_steps()
     current = st.session_state["wizard_step"]
-    idx = steps.index(current) + 1
-    st.progress(idx / len(steps))
+    # Use the fixed step numbering (STEP_DISPLAY_NUMBER / TOTAL_STEPS)
+    # rather than idx / len(active_steps()). The active step list's length
+    # flips between 6 and 7 depending on the LD-proxies Yes/No choice
+    # (step 4.5 is conditionally included), which made idx/len(steps) jump
+    # around even while sitting still on the same step. Step numbers,
+    # including the fractional "4.5", are fixed regardless of that choice,
+    # so the bar now advances monotonically no matter what's toggled.
+    fraction = float(STEP_DISPLAY_NUMBER[current]) / TOTAL_STEPS
+    st.progress(min(fraction, 1.0))
     st.caption(f"Step {STEP_DISPLAY_NUMBER[current]} of {TOTAL_STEPS} &nbsp;·&nbsp; **{STEP_TITLE[current]}**")
 
 
@@ -268,8 +274,7 @@ init_session_state()
 
 st.title("🧬 PGS Grep")
 st.caption(
-    "A step-by-step application for locating a single SNP RSID (and its LD proxies) "
-    "inside a Polygenic Score (PGS) file."
+    "An application for locating an SNP (and related variants) inside a Polygenic Score (PGS) file."
 )
 render_progress_indicator()
 st.divider()
@@ -483,10 +488,16 @@ similar genetic signal.
         """
     )
 
-    st.session_state["want_ld_proxies"] = st.radio(
+    # Bound directly to session_state via key= (rather than reassigning
+    # st.session_state["want_ld_proxies"] from the widget's return value
+    # while also recomputing `index` from that same variable every rerun).
+    # That dual read/write pattern raced with Streamlit's own widget-state
+    # sync and was the source of the erratic progress bar / stalled
+    # navigation buttons when toggling this choice.
+    st.radio(
         "Would you like to search for LD Proxies?",
         ["No, scan target position only", "Yes, also search LD proxies (requires a free token)"],
-        index=0 if st.session_state["want_ld_proxies"].startswith("No") else 1,
+        key="want_ld_proxies",
     )
 
     st.write("")
@@ -732,9 +743,15 @@ def run_scan() -> None:
             """
             clamped = max(0.0, min(PROGRESS_CAP, percent_complete))
             pct = int(clamped * 100)
+            # current_pos comes from the backend's read/parse loop and can
+            # occasionally report a position past end_window (e.g. a final
+            # buffered read that overshoots the window edge). Clamp what's
+            # displayed to the actual search window so the text never shows
+            # a coordinate outside the range it claims to be scanning.
+            display_pos = max(start_window, min(current_pos, end_window))
             progress_bar.progress(
                 clamped,
-                text=f"Scanning… {pct}% (position {current_pos:,} of Chr{s['chromosome']}:{start_window:,}-{end_window:,})",
+                text=f"Scanning… {pct}% (position {display_pos:,} of Chr{s['chromosome']}:{start_window:,}-{end_window:,})",
             )
             progress_status.caption(f"Variants in window so far: **{variants_found}**")
 
@@ -890,16 +907,9 @@ def render_step6_execute() -> None:
         render_results()
 
     st.write("")
-    col_back, col_restart = st.columns(2)
-    with col_back:
-        if st.button("Back to Config", width='stretch'):
-            go_to_prev_step()
-            st.rerun()
-    with col_restart:
-        if st.button("Start Over", width='stretch'):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+    if st.button("Back to Config", width='stretch'):
+        go_to_prev_step()
+        st.rerun()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
