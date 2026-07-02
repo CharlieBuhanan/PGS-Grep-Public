@@ -9,5 +9,8 @@ secondaryBackgroundColor = "#F0F2F6"
 
 textColor = "#262730"
 
+[server]
+enableStaticServing = true
+
 # The font family: "sans serif", "serif", or "monospace"
 font = "Sans Serif"
