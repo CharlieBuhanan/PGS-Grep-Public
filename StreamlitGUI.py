@@ -158,37 +158,46 @@ def wants_ld_proxies() -> bool:
     return st.session_state["want_ld_proxies"].startswith("Yes")
 
 
-def active_steps() -> list[str]:
-    """The ordered list of steps that actually apply, given the user's choices so far."""
-    return [s for s in STEP_ORDER if s != "ld_auth" or wants_ld_proxies()]
-
-
 def go_to_next_step() -> None:
-    """Advance the wizard to the next applicable step (skips 4.5 when not needed)."""
-    steps = active_steps()
-    idx = steps.index(st.session_state["wizard_step"])
-    if idx < len(steps) - 1:
-        st.session_state["wizard_step"] = steps[idx + 1]
+    """
+    Advance the wizard to the next step in the fixed STEP_ORDER sequence,
+    automatically skipping over 'ld_auth' when LD proxies are disabled.
+
+    STEP_ORDER never changes shape (unlike the old dynamically-filtered
+    list), so st.session_state["wizard_step"] is always a valid member of
+    it and STEP_ORDER.index(...) can never raise ValueError.
+    """
+    idx = STEP_ORDER.index(st.session_state["wizard_step"]) + 1
+    while idx < len(STEP_ORDER) and STEP_ORDER[idx] == "ld_auth" and not wants_ld_proxies():
+        idx += 1
+    if idx < len(STEP_ORDER):
+        st.session_state["wizard_step"] = STEP_ORDER[idx]
 
 
 def go_to_prev_step() -> None:
-    """Move the wizard back to the previous applicable step (skips 4.5 when not needed)."""
-    steps = active_steps()
-    idx = steps.index(st.session_state["wizard_step"])
-    if idx > 0:
-        st.session_state["wizard_step"] = steps[idx - 1]
+    """
+    Move the wizard back to the previous step in the fixed STEP_ORDER
+    sequence, automatically skipping over 'ld_auth' when LD proxies are
+    disabled. See go_to_next_step() for why STEP_ORDER (rather than a
+    dynamically-filtered list) is used for the index lookup.
+    """
+    idx = STEP_ORDER.index(st.session_state["wizard_step"]) - 1
+    while idx >= 0 and STEP_ORDER[idx] == "ld_auth" and not wants_ld_proxies():
+        idx -= 1
+    if idx >= 0:
+        st.session_state["wizard_step"] = STEP_ORDER[idx]
 
 
 def render_progress_indicator() -> None:
     """Draw a slim progress bar + 'Step X of Y' caption at the top of the wizard."""
     current = st.session_state["wizard_step"]
     # Use the fixed step numbering (STEP_DISPLAY_NUMBER / TOTAL_STEPS)
-    # rather than idx / len(active_steps()). The active step list's length
-    # flips between 6 and 7 depending on the LD-proxies Yes/No choice
-    # (step 4.5 is conditionally included), which made idx/len(steps) jump
-    # around even while sitting still on the same step. Step numbers,
-    # including the fractional "4.5", are fixed regardless of that choice,
-    # so the bar now advances monotonically no matter what's toggled.
+    # rather than deriving a fraction from position-in-sequence. Whether
+    # 'ld_auth' is visited or skipped depends on the LD-proxies Yes/No
+    # choice, which would make a position-based fraction jump around even
+    # while sitting still on the same step. Step numbers, including the
+    # fractional "4.5", are fixed regardless of that choice, so the bar
+    # advances monotonically no matter what's toggled.
     fraction = float(STEP_DISPLAY_NUMBER[current]) / TOTAL_STEPS
     st.progress(min(fraction, 1.0))
     st.caption(f"Step {STEP_DISPLAY_NUMBER[current]} of {TOTAL_STEPS} &nbsp;·&nbsp; **{STEP_TITLE[current]}**")
@@ -204,48 +213,143 @@ st.set_page_config(
     page_icon="🧬",
 )
 
-# Custom typography: local Roboto .ttf files served from a /fonts directory
-# alongside this script, plus minimal spacing / click-target CSS, plus a
-# small fixed-position credit caption in the corner of the app.
 st.markdown(
     """
     <style>
     @font-face {
         font-family: 'Roboto';
-        src: url('/static/Roboto-Regular.ttf') format('truetype');
+        src: url('app/static/Roboto-Regular.ttf') format('truetype');
         font-weight: 400;
         font-style: normal;
+        font-display: swap;
     }
     @font-face {
         font-family: 'Roboto';
-        src: url('/fonts/Roboto-Medium.ttf') format('truetype');
+        src: url('app/static/Roboto-Medium.ttf') format('truetype');
         font-weight: 500;
         font-style: normal;
+        font-display: swap;
     }
     @font-face {
         font-family: 'Roboto';
-        src: url('/fonts/Roboto-Bold.ttf') format('truetype');
+        src: url('app/static/Roboto-Bold.ttf') format('truetype');
         font-weight: 700;
         font-style: normal;
+        font-display: swap;
     }
     @font-face {
         font-family: 'Roboto';
-        src: url('/fonts/Roboto-Italic.ttf') format('truetype');
+        src: url('app/static/Roboto-Italic.ttf') format('truetype');
         font-weight: 400;
         font-style: italic;
+        font-display: swap;
     }
-    html, body, [class*="css"] {
-        font-family: 'Roboto', sans-serif !important;
+
+    /* ---- Typography ------------------------------------------------- */
+    html, body, [class*="css"], .stApp, .stMarkdown, .stApp p,
+    .stApp span, .stApp label, .stApp div {
+        font-family: 'Roboto', 'Helvetica Neue', Arial, sans-serif !important;
     }
+    code, pre, .stCode, [data-testid="stCodeBlock"] {
+        font-family: 'Roboto Mono', 'Courier New', monospace !important;
+    }
+    h1, h2, h3, h4 {
+        font-family: 'Roboto', 'Helvetica Neue', Arial, sans-serif !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.01em;
+        color: #1a2b4c;
+    }
+
+    /* ---- Widen the content column by ~15% ---------------------------- */
+    .block-container {
+        max-width: 840px;
+        padding-top: 2.2rem;
+        padding-bottom: 3rem;
+    }
+
+    /* ---- App title / caption ------------------------------------------ */
+    [data-testid="stAppViewContainer"] h1 {
+        font-weight: 800 !important;
+        color: #004085;
+    }
+
+    /* ---- Buttons -------------------------------------------------- */
     div.stButton > button {
-        padding: 0.6em 1.4em;
-        font-size: 1.05rem;
-        border-radius: 8px;
+        padding: 0.62em 1.5em;
+        font-size: 1.02rem;
+        font-weight: 600;
+        border-radius: 10px;
+        border: 1px solid #d5dbe6;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+        transition: all 0.15s ease-in-out;
+    }
+    div.stButton > button:hover {
+        border-color: #004085;
+        color: #004085;
+        box-shadow: 0 2px 6px rgba(0, 64, 133, 0.15);
+        transform: translateY(-1px);
+    }
+    div.stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #004085 0%, #0b5fb8 100%);
+        border: none;
+        box-shadow: 0 2px 6px rgba(0, 64, 133, 0.25);
+    }
+    div.stButton > button[kind="primary"]:hover {
+        box-shadow: 0 4px 12px rgba(0, 64, 133, 0.35);
+        transform: translateY(-1px);
+    }
+    div.stDownloadButton > button {
+        border-radius: 10px;
+        font-weight: 600;
+    }
+
+    /* ---- Inputs, selects, radios ------------------------------------- */
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stNumberInput"] input,
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] {
+        border-radius: 8px !important;
     }
     div[data-testid="stRadio"] label {
         font-size: 1.02rem;
         padding: 4px 0;
     }
+    div[data-testid="stRadio"] > div {
+        gap: 0.35rem;
+    }
+
+    /* ---- Cards: expanders / info / warning / success boxes ------------ */
+    div[data-testid="stExpander"] {
+        border-radius: 12px;
+        border: 1px solid #e3e8f0;
+        overflow: hidden;
+    }
+    div[data-testid="stAlert"] {
+        border-radius: 10px;
+        padding: 0.9rem 1.1rem;
+    }
+
+    /* ---- Metrics -------------------------------------------------- */
+    div[data-testid="stMetric"] {
+        background: #f7f9fc;
+        border: 1px solid #e3e8f0;
+        border-radius: 12px;
+        padding: 0.8rem 1rem;
+    }
+
+    /* ---- Headers get a touch more breathing room ---------------------- */
+    h2, h3 {
+        margin-top: 1.4rem;
+    }
+    hr {
+        margin: 1.6rem 0;
+    }
+
+    /* ---- Progress bar ------------------------------------------------ */
+    div[data-testid="stProgress"] > div > div {
+        border-radius: 8px;
+    }
+
+    /* ---- Corner credit caption ----------------------------------------- */
     #app-credit-caption {
         position: fixed;
         bottom: 6px;
@@ -528,10 +632,10 @@ def render_step4_5_ld_auth() -> None:
     )
     st.markdown("[Get a free token here (ldlink.nih.gov)](https://ldlink.nih.gov/apiaccess)")
 
-    st.session_state["ldlink_token"] = st.text_input(
+    st.text_input(
         "LDLink API Token",
-        value=st.session_state["ldlink_token"],
         type="password",
+        key="ldlink_token",
         help="Your token is only used for this session's LDlink API calls. "
              "Identical queries are cached locally for future runs.",
     )
@@ -568,36 +672,37 @@ def render_step5_config() -> None:
     st.caption(
         "Enter the chromosome and position you looked up in the previous step."
     )
-    st.session_state["target_rsid"] = st.text_input(
+    st.text_input(
         "Target rsID (must match center position)",
-        value=st.session_state["target_rsid"],
+        key="target_rsid",
     )
 
     col_build, col_chr = st.columns(2)
     with col_build:
         build_options = ["GRCh38", "GRCh37"]
-        st.session_state["genome_build"] = st.selectbox(
+        st.selectbox(
             "Genome Assembly",
             build_options,
-            index=build_options.index(st.session_state["genome_build"]),
+            key="genome_build",
             help="Auto-filled from your uploaded PGS file when available.",
         )
     with col_chr:
-        st.session_state["chromosome"] = st.number_input(
+        st.number_input(
             "Chromosome #", min_value=1, max_value=25,
-            value=st.session_state["chromosome"],
+            key="chromosome",
         )
 
-    st.session_state["target_pos"] = st.number_input(
+    st.number_input(
         "Center Position (target variant position)",
-        value=st.session_state["target_pos"],
+        key="target_pos",
         help="The scan searches for variants at this base-pair position, plus the window below.",
     )
 
     st.subheader("Genomic Search Window")
-    st.session_state["window_size"] = st.number_input(
+    st.number_input(
         "Flanking Size (+/- base pairs)",
-        value=st.session_state["window_size"], step=1_000,
+        step=1_000,
+        key="window_size",
         help="Creates a window this many base pairs on either side of the center position.",
     )
     start_window = st.session_state["target_pos"] - st.session_state["window_size"]
@@ -609,33 +714,29 @@ def render_step5_config() -> None:
 
     if wants_ld_proxies():
         st.subheader("LD Proxy Settings")
-        st.session_state["population"] = st.selectbox(
+        st.selectbox(
             "LD Population (1000 Genomes)",
             ["EUR", "AMR", "AFR", "EAS", "SAS"],
-            index=["EUR", "AMR", "AFR", "EAS", "SAS"].index(st.session_state["population"]),
+            key="population",
             help="EUR = European, AMR = Admixed American, AFR = African, EAS = East Asian, SAS = South Asian.",
         )
-        st.session_state["ld_metric"] = st.radio(
+        st.radio(
             "Filter proxies by",
             ["R² only", "D′ only", "R² and D′ (both must pass)"],
-            index=["R² only", "D′ only", "R² and D′ (both must pass)"].index(st.session_state["ld_metric"]),
+            key="ld_metric",
             help="R² measures correlation between alleles; D′ measures maximum possible LD.",
         )
         use_r2 = st.session_state["ld_metric"] in ("R² only", "R² and D′ (both must pass)")
         use_dprime = st.session_state["ld_metric"] in ("D′ only", "R² and D′ (both must pass)")
         if use_r2:
-            st.session_state["r2_filter"] = st.slider(
-                "R² Threshold", 0.0, 1.0, st.session_state["r2_filter"], 0.05
-            )
+            st.slider("R² Threshold", 0.0, 1.0, step=0.05, key="r2_filter")
         if use_dprime:
-            st.session_state["dprime_filter"] = st.slider(
-                "D′ Threshold", 0.0, 1.0, st.session_state["dprime_filter"], 0.05
-            )
+            st.slider("D′ Threshold", 0.0, 1.0, step=0.05, key="dprime_filter")
 
     st.subheader("📋 Output Filtering")
-    st.session_state["proxies_only"] = st.checkbox(
+    st.checkbox(
         "Hide unlinked variants",
-        value=st.session_state["proxies_only"],
+        key="proxies_only",
         help="Hide variants in the window that are neither the exact target nor a qualifying LD proxy. "
              "Applies to both the on-screen table and the exported CSV.",
     )

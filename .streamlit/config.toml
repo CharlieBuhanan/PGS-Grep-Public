@@ -9,8 +9,37 @@ secondaryBackgroundColor = "#F0F2F6"
 
 textColor = "#262730"
 
+# Use the locally-hosted "Roboto" family defined by the [[theme.fontFaces]]
+# entries below (native custom-font support in modern Streamlit) instead of
+# a generic keyword like "sans serif".
+font = "Roboto"
+
+# Each entry maps one weight/style of Roboto to its file in ./static/.
+# enableStaticServing (below) exposes that folder at the URL path
+# "app/static/<filename>", which is what these entries reference.
+[[theme.fontFaces]]
+family = "Roboto"
+url = "app/static/Roboto-Regular.ttf"
+style = "normal"
+weight = 400
+
+[[theme.fontFaces]]
+family = "Roboto"
+url = "app/static/Roboto-Medium.ttf"
+style = "normal"
+weight = 500
+
+[[theme.fontFaces]]
+family = "Roboto"
+url = "app/static/Roboto-Bold.ttf"
+style = "normal"
+weight = 700
+
+[[theme.fontFaces]]
+family = "Roboto"
+url = "app/static/Roboto-Italic.ttf"
+style = "italic"
+weight = 400
+
 [server]
 enableStaticServing = true
-
-# The font family: "sans serif", "serif", or "monospace"
-font = "Sans Serif"
