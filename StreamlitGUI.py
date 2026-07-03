@@ -410,7 +410,7 @@ st.markdown(
     }
     </style>
     <div id="app-credit-caption">
-        Charlie Buhanan, PGS Grep V1.1, 2026, Download for better results here:
+        Charlie Buhanan, PGS Grep V1.1, 2026, Download for better results at:
         <a href="https://github.com/CharlieBuhanan/PGS-Grep-Public" target="_blank">
         https://github.com/CharlieBuhanan/PGS-Grep-Public</a>
     </div>
@@ -446,10 +446,8 @@ def render_step1_welcome() -> None:
         "[LDlink API](https://ldlink.nih.gov/apiaccess)."
     )
 
-    with st.expander("ℹ️ Terms", expanded=False):
-        st.markdown(
-            """
-**Polygenic Score (PGS)**: a numeric score that estimates an individual's genetic predisposition to a trait or disease, based on the combined effect of many genetic variants.
+    with st.expander("ℹ️ Information on Key Terms", expanded=False):
+        st.markdown("""**Polygenic Score (PGS)**: a numeric score that estimates an individual's genetic predisposition to a trait or disease, based on the combined effect of many genetic variants.
 PGS files are published in the PGS Catalog (https://www.pgscatalog.org/) and detail the genetic variants and how much each contributes to a target disease.
 
 **SNP (Single Nucleotide Polymorphism)**: a single base pair location in the DNA
@@ -465,20 +463,23 @@ genetic signal.
 
 **LDLink API Access Token**: this optional token can be obtained for free at [LDLink API](https://ldlink.nih.gov/apiaccess), hosted and developed by the National Cancer Institute (NCI), 
 part of the U.S. National Institutes of Health (NIH). This token authenticates a request for LD proxy data from the LDLink database. Your token is never stored or shared. If you choose to provide one, it will only be used for LDLink's API calls. You can see how your token is
-used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep-Public.
-            """
-        )
+used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep-Public.""")
 
     st.subheader("Before you start, consider:")
     st.markdown(
         """
 - A **target SNP RSID** (ex: rs10305420) that you want to locate
-- 📁 A Polygenic Score (PGS) file (or its PGS Catalog / publication ID)
-- Optional: [LDLink API Token](https://ldlink.nih.gov/apiaccess) *(if you want to consider Linkage Disequilibrium in your results)*
+- A Polygenic Score (PGS) file (or a publication on the PGS Catalog)
+- Whether or not you want to consider Linkage Disequilibrium in your results (this requires a free LDLink Token from the National Cancer Institute, see the [LDLink API](https://ldlink.nih.gov/apiaccess))
         """
     )
 
     st.info("The next steps will guide you through finding a suitable PGS file, configuring the search, and obtaining an LDLink Token if necessary.")
+
+    st.write("")
+    if st.button("Get Started", type="primary", width='stretch'):
+        go_to_next_step()
+        st.rerun()
 
     st.warning(
         "This application is hosted on the free Streamlit "
@@ -486,11 +487,6 @@ used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep
         "temporary slowdowns or outages. For the best experience, download and run the application locally "
         "from: https://github.com/CharlieBuhanan/PGS-Grep-Public"
     )
-
-    st.write("")
-    if st.button("Get Started", type="primary", width='stretch'):
-        go_to_next_step()
-        st.rerun()
 
     with st.expander("License", expanded=False):
         st.markdown(
@@ -513,7 +509,7 @@ def render_step2_upload() -> None:
     session_state. Detects newly-uploaded files and clears any stale
     downstream results so they can never be mixed with a new source file.
     """
-    st.header("📁 Get Your PGS File")
+    st.header("📁 Get Your PGS File from the PGS Catalog")
 
     with st.expander("How do I download a harmonized PGS file?", expanded=False):
         st.markdown(
@@ -527,11 +523,11 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
 4. Download the **harmonized** scoring file. Filename ends in `_hmPOS_GRCh38.txt.gz`
    or `_hmPOS_GRCh37.txt.gz`, depending on the genome build.""", help = "The genome build GRCh38 (hg38) and GRCh37 (hg19) specifies the reference human genome assembly used to define the chromosomal coordinates of the SNPs in the file. Be sure to download the harmonized version of the score  file for your desired genome build.")
 
-        st.markdown("5. Download the optional corresponding MD5 file if you want to verify the download's integrity.", help = "Optional. The .md5 / .txt checksum file from the PGS Catalog, "
+        st.markdown("5. Download the optional corresponding MD5 file if you want to verify the download's integrity.", help = "Optional. The .md5 / .txt checksum file from the PGS Catalog is "
                  "used to confirm your download wasn't corrupted or truncated.")
-        st.markdown("6. No need to unzip. Upload the `.txt.gz` file directly below and the MD5 file if you have it. 200 Megabyte maximum file upload size.", help="PGS Grep can read the .gz zipped file type directly. No zipped files on the PGS Catalogue exceed 200 MB as of June 2026.")
+        st.markdown("6. No need to unzip. Upload the `.txt.gz` file directly below and the MD5 file if you have it. 200 megabytes is the maximum size for file uploads.", help="PGS Grep can read the .gz zipped file type directly. No zipped files on the PGS Catalogue exceed 200 MB as of June 2026.")
 
-    col_upload, col_md5 = st.columns([3, 2])
+    col_upload, col_md5 = st.columns([1,1])
     with col_upload:
         st.markdown("**Harmonized PGS File** *(`.txt.gz`)*")
         uploaded_file = st.file_uploader(
@@ -543,7 +539,7 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
             "Upload MD5", type=["md5"], key="md5_uploader",
             label_visibility="collapsed",
         )
-    st.caption("200 MB maximum file size.")
+    st.caption("200 MB maximum file size. Must be in harmonized format.")
 
     if uploaded_file is not None:
         if uploaded_file.size > MAX_PGS_FILE_SIZE_BYTES:
@@ -574,13 +570,13 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
                 expected_hash = parse_md5_file(md5_content)
                 actual_hash = compute_md5(file_bytes)
                 if expected_hash is None:
-                    st.warning("Could not parse the MD5 file — skipping integrity check.")
+                    st.warning("Could not parse the MD5 file, skipping integrity check.")
                 elif actual_hash.lower() == expected_hash.lower():
                     st.success(f"MD5 verified: `{actual_hash}`")
                 else:
                     st.error(
                         f"MD5 mismatch! Expected `{expected_hash}`, got `{actual_hash}`. "
-                        "The file may be corrupted — proceed with caution."
+                        "The file may be corrupted, proceed with caution."
                     )
 
     # Metadata preview + validation, using whatever is currently cached.
@@ -613,8 +609,7 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
             st.error(
                 "**This doesn't look like a harmonized PGS file.** No harmonized-build "
                 "metadata (`hm_pos`) was found, and the filename doesn't include `_hmPOS_`. "
-                "This app scans harmonized coordinates, so please re-download the "
-                "**harmonized** version of this score from the PGS Catalog's "
+                "Please re-download the **harmonized** version of this score from the PGS Catalog's "
                 "'Harmonized' folder (see the instructions above) before continuing."
             )
     else:
@@ -660,13 +655,13 @@ def render_step3_rsid_guide() -> None:
     st.subheader("How to find the coordinates")
     st.markdown(
         f"""
-1. Open the [NCBI Genome Data Viewer](https://www.ncbi.nlm.nih.gov/gdv).
+1. Open the [NCBI Genome Data Viewer](https://www.ncbi.nlm.nih.gov/gdv). This resource is managed by the National Library of Medicine and provides a visual interface to explore genomic data.
 2. Search for your rsID (e.g. `rs10305420`).
 3. **Set the reference assembly to match your uploaded PGS file: `{detected_build}`.**
    Coordinates differ between assemblies, so using the wrong one will point you
    to the wrong position.
 4. Note down the **chromosome number** and **base-pair position** shown for
-   that assembly. You'll need this when setting the search window.
+   that assembly, or keep the tab open. You'll need this when setting the search window.
         """
     )
 
@@ -745,7 +740,7 @@ def render_step4_5_ld_auth() -> None:
     st.header("LDLink API Token")
     st.markdown(
         "LD proxy lookups are powered by the **LDlink API**, a free service run "
-        "by the NIH's National Cancer Institute. It requires a personal access "
+        "by the National Cancer Institute. It requires a personal access "
         "token to authenticate requests and apply per-user rate limits — this "
         "app only uses it to make LD queries on your behalf during this session."
     )
