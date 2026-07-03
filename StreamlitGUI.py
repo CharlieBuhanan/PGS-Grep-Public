@@ -233,26 +233,7 @@ st.set_page_config(
 )
 
 # Custom typography, layout width, and visual polish.
-#
-# Fonts: Roboto is served locally from ./static/ (enableStaticServing=true
-# in config.toml). Streamlit's static file server exposes anything in that
-# folder at the path "app/static/<filename>" (NOT "/static/..." or
-# "/fonts/..." — both of those were wrong in the previous version, which is
-# why only the Regular weight ever had a chance of loading and the other
-# three @font-face rules pointed at a folder that was never served). The
-# primary mechanism for the custom font is now the native
-# `[[theme.fontFaces]]` entries in .streamlit/config.toml (the officially
-# supported way to ship a local font in modern Streamlit). The @font-face
-# block below is kept as a same-origin CSS fallback for Streamlit versions
-# that predate native font-face theming, and now uses the correct path.
-#
-# Width: Streamlit's "centered" layout caps .block-container at a fixed
-# max-width with no config.toml equivalent to change it, so widening the
-# usable content area has to be done with a CSS override. ~730px is the
-# framework default in current Streamlit releases, so ~840px (+15%) is
-# used below, with the same proportional bump applied to the sidebar-less
-# top padding so the enlarged layout still reads as intentional rather
-# than just "stretched."
+# Fonts: Roboto is served locally from ./static/ (enableStaticServing=true in config.toml).
 st.markdown(
     """
     <style>
@@ -812,13 +793,6 @@ def render_step5_config() -> None:
             help="The chromosome your target variant is on (1-22, 23=X, 24=Y, 25=MT).",
         )
 
-    # A native st.number_input silently rejects pasted values that include
-    # thousands separators (e.g. "39,048,860", the format NCBI's Genome
-    # Data Viewer displays and that users naturally copy) — the browser's
-    # <input type="number"> just discards the whole paste. A text field
-    # with a small parsing callback accepts the paste and strips the
-    # commas itself, while still keeping 'target_pos' numeric everywhere
-    # else in the app.
     st.text_input(
         "Center Position (target variant position)",
         key="target_pos_text",
@@ -829,7 +803,7 @@ def render_step5_config() -> None:
              "for variants at this position, plus the window below.",
     )
     if not st.session_state["target_pos_text"].replace(",", "").replace(" ", "").strip().lstrip("-").isdigit():
-        st.caption("⚠️ Enter digits only (commas are fine) — using the last valid position for now.")
+        st.caption("⚠️ Enter digits only (commas are fine)")
 
     st.subheader("Genomic Search Window")
     st.number_input(
@@ -842,11 +816,11 @@ def render_step5_config() -> None:
     end_window = st.session_state["target_pos"] + st.session_state["window_size"]
     st.caption(
         f"Search window: **Chr{st.session_state['chromosome']}:"
-        f"{start_window:,} – {end_window:,}**"
+        f"{start_window:,} - {end_window:,}**"
     )
 
     population_selected = True
-    if wants_ld_proxies():
+    if wants_ld_proxies(): # BUG, THIS IS NOT SHOWING AT ALL, NEED TO FIX
         st.subheader("LD Proxy Settings")
         population_options = ["Choose...", "EUR", "AMR", "AFR", "EAS", "SAS"]
         st.selectbox(
@@ -887,7 +861,6 @@ def render_step5_config() -> None:
                      "have with the target SNP to be kept. Higher = stricter, fewer proxies.",
             )
 
-    st.subheader("📋 Output Filtering")
     st.checkbox(
         "Hide unlinked variants",
         key="proxies_only",
@@ -921,7 +894,7 @@ def render_scan_summary() -> None:
     lines = [
         f"- **File:** `{s['pgs_file_name']}`",
         f"- **Target rsID:** `{s['target_rsid']}` at Chr{s['chromosome']}:{s['target_pos']:,}",
-        f"- **Search window:** Chr{s['chromosome']}:{start_window:,} – {end_window:,}",
+        f"- **Search window:** Chr{s['chromosome']}:{start_window:,} - {end_window:,}",
         f"- **Genome build:** {s['genome_build']}",
         f"- **LD Proxies:** {'Enabled (' + s['population'] + ', ' + s['ld_metric'] + ')' if wants_ld_proxies() else 'Disabled'}",
         f"- **Hide unlinked variants:** {'Yes' if s['proxies_only'] else 'No'}",
