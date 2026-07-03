@@ -18,6 +18,23 @@ def compute_md5(file_bytes: bytes) -> str:
     return hashlib.md5(file_bytes).hexdigest()
 
 
+def _sync_target_pos_from_text() -> None:
+    """
+    Callback for the Center Position text field. Strips thousands
+    separators and whitespace (positions copied from NCBI's Genome Data
+    Viewer are formatted like "39,048,860", which a native numeric input
+    silently rejects on paste) and, if what's left is a valid integer,
+    writes it into the numeric 'target_pos' session-state key that the
+    rest of the app relies on. Invalid input is left in the text box
+    as-is and simply doesn't update 'target_pos', so a bad paste can't
+    silently corrupt the search window.
+    """
+    raw = st.session_state.get("target_pos_text", "")
+    cleaned = raw.replace(",", "").replace(" ", "").strip()
+    if cleaned.lstrip("-").isdigit():
+        st.session_state["target_pos"] = int(cleaned)
+
+
 def parse_md5_file(md5_content: str) -> str | None:
     """Pull the first hash token out of an uploaded .md5 checksum file."""
     for line in md5_content.strip().splitlines():
@@ -130,6 +147,7 @@ def init_session_state() -> None:
         "pgs_file_bytes": None,
         "pgs_file_name": None,
         "pgs_file_signature": None,
+        "pgs_file_is_harmonized": None,
         "preview_metadata": None,
         # Step 3 / 3.5 — LD proxies
         "want_ld_proxies": "No, scan target position only",
@@ -137,9 +155,10 @@ def init_session_state() -> None:
         # Step 4 — search configuration
         "target_rsid": "rs10305420",
         "genome_build": "GRCh38",
-        "population": "EUR",
+        "population": "Choose...",
         "chromosome": 6,
         "target_pos": 39_048_860,
+        "target_pos_text": "39,048,860",
         "window_size": 10_000,
         "ld_metric": "R² only",
         "r2_filter": 0.7,
@@ -213,6 +232,27 @@ st.set_page_config(
     page_icon="🧬",
 )
 
+# Custom typography, layout width, and visual polish.
+#
+# Fonts: Roboto is served locally from ./static/ (enableStaticServing=true
+# in config.toml). Streamlit's static file server exposes anything in that
+# folder at the path "app/static/<filename>" (NOT "/static/..." or
+# "/fonts/..." — both of those were wrong in the previous version, which is
+# why only the Regular weight ever had a chance of loading and the other
+# three @font-face rules pointed at a folder that was never served). The
+# primary mechanism for the custom font is now the native
+# `[[theme.fontFaces]]` entries in .streamlit/config.toml (the officially
+# supported way to ship a local font in modern Streamlit). The @font-face
+# block below is kept as a same-origin CSS fallback for Streamlit versions
+# that predate native font-face theming, and now uses the correct path.
+#
+# Width: Streamlit's "centered" layout caps .block-container at a fixed
+# max-width with no config.toml equivalent to change it, so widening the
+# usable content area has to be done with a CSS override. ~730px is the
+# framework default in current Streamlit releases, so ~840px (+15%) is
+# used below, with the same proportional bump applied to the sidebar-less
+# top padding so the enlarged layout still reads as intentional rather
+# than just "stretched."
 st.markdown(
     """
     <style>
@@ -246,8 +286,13 @@ st.markdown(
     }
 
     /* ---- Typography ------------------------------------------------- */
+    /* Note: icon elements (e.g. the expander arrow, which Streamlit renders
+       via a ligature-based icon font) are excluded from this override.
+       Forcing Roboto onto them breaks the ligature and prints the raw
+       icon name ("keyboard_arrow_right" etc.) as overlapping text. */
     html, body, [class*="css"], .stApp, .stMarkdown, .stApp p,
-    .stApp span, .stApp label, .stApp div {
+    .stApp span:not([data-testid="stIconMaterial"]),
+    .stApp label, .stApp div {
         font-family: 'Roboto', 'Helvetica Neue', Arial, sans-serif !important;
     }
     code, pre, .stCode, [data-testid="stCodeBlock"] {
@@ -270,7 +315,7 @@ st.markdown(
     /* ---- App title / caption ------------------------------------------ */
     [data-testid="stAppViewContainer"] h1 {
         font-weight: 800 !important;
-        color: #004085;
+        color: #000000;
     }
 
     /* ---- Buttons -------------------------------------------------- */
@@ -280,27 +325,26 @@ st.markdown(
         font-weight: 600;
         border-radius: 10px;
         border: 1px solid #d5dbe6;
-        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
-        transition: all 0.15s ease-in-out;
+        transition: box-shadow 0.15s ease-in-out;
     }
     div.stButton > button:hover {
-        border-color: #004085;
-        color: #004085;
-        box-shadow: 0 2px 6px rgba(0, 64, 133, 0.15);
-        transform: translateY(-1px);
-    }
-    div.stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, #004085 0%, #0b5fb8 100%);
-        border: none;
-        box-shadow: 0 2px 6px rgba(0, 64, 133, 0.25);
-    }
-    div.stButton > button[kind="primary"]:hover {
-        box-shadow: 0 4px 12px rgba(0, 64, 133, 0.35);
-        transform: translateY(-1px);
+        box-shadow: 0 2px 6px rgba(16, 24, 40, 0.12);
     }
     div.stDownloadButton > button {
         border-radius: 10px;
         font-weight: 600;
+        transition: box-shadow 0.15s ease-in-out;
+    }
+    div.stDownloadButton > button:hover {
+        box-shadow: 0 2px 6px rgba(16, 24, 40, 0.12);
+    }
+
+    /* ---- File uploaders: force equal height regardless of column width
+       (the PGS and MD5 dropzones sit in unequal-width columns, and their
+       helper text — "GZ" vs "MD5, TXT" — can wrap differently, making the
+       two boxes render at different heights without this). ------------- */
+    div[data-testid="stFileUploaderDropzone"] {
+        min-height: 112px;
     }
 
     /* ---- Inputs, selects, radios ------------------------------------- */
@@ -402,26 +446,65 @@ def render_step1_welcome() -> None:
         "[LDlink API](https://ldlink.nih.gov/apiaccess)."
     )
 
-    st.subheader("Before you start, consider gathering:")
+    with st.expander("ℹ️ Terms", expanded=False):
+        st.markdown(
+            """
+**Polygenic Score (PGS)**: a numeric score that estimates an individual's genetic predisposition to a trait or disease, based on the combined effect of many genetic variants.
+PGS files are published in the PGS Catalog (https://www.pgscatalog.org/) and detail the genetic variants and how much each contributes to a target disease.
+
+**SNP (Single Nucleotide Polymorphism)**: a single base pair location in the DNA
+sequence where individuals commonly differ. This app searches for SNPs by their position in the human genome. 
+
+**LD (Linkage Disequilibrium)**: a measure of how often two nearby genetic
+variants are inherited together. Variants close together on a chromosome tend to have a higher LD.
+
+**LD Proxies**: SNPs that are in strong linkage disequilibrium with a target SNP, meaning
+they're usually inherited alongside it. They are useful because if an SNP is missing from a PGS file, a proxy that
+tracks closely with it can act as a stand-in and capture a similar
+genetic signal.
+
+**LDLink API Access Token**: this optional token can be obtained for free at [LDLink API](https://ldlink.nih.gov/apiaccess), hosted and developed by the National Cancer Institute (NCI), 
+part of the U.S. National Institutes of Health (NIH). This token authenticates a request for LD proxy data from the LDLink database. Your token is never stored or shared. If you choose to provide one, it will only be used for LDLink's API calls. You can see how your token is
+used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep-Public.
+            """
+        )
+
+    st.subheader("Before you start, consider:")
     st.markdown(
         """
 - A **target SNP RSID** (ex: rs10305420) that you want to locate
 - 📁 A Polygenic Score (PGS) file (or its PGS Catalog / publication ID)
-- Optional: [LDLink API Token](https://ldlink.nih.gov/apiaccess) *(only if you want to consider Linkage Disequilibrium in your results)*
+- Optional: [LDLink API Token](https://ldlink.nih.gov/apiaccess) *(if you want to consider Linkage Disequilibrium in your results)*
         """
     )
 
-    st.info("The next steps will guide you through finding a suitable PGS file, configuring the search, and finding an LDLink Token if necessary.")
+    st.info("The next steps will guide you through finding a suitable PGS file, configuring the search, and obtaining an LDLink Token if necessary.")
+
+    st.warning(
+        "This application is hosted on the free Streamlit "
+        "Community Cloud for demonstration purposes. Heavy usage may cause "
+        "temporary slowdowns or outages. For the best experience, download and run the application locally "
+        "from: https://github.com/CharlieBuhanan/PGS-Grep-Public"
+    )
 
     st.write("")
     if st.button("Get Started", type="primary", width='stretch'):
         go_to_next_step()
         st.rerun()
 
+    with st.expander("License", expanded=False):
+        st.markdown(
+            "PGS Grep is released under the **GNU General Public License v3.0 (GPL-3.0).** You are free to reuse and modify this code under the terms of the GPL-3.0 license, but any derivative work must also be released under the same license."
+            " See details at https://www.gnu.org/licenses/gpl-3.0.html"
+        )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 2: File Acquisition & Upload
 # ─────────────────────────────────────────────────────────────────────────────
+
+MAX_PGS_FILE_SIZE_BYTES = 200 * 1024 * 1024  # No zipped PGS file exceeds 200 MB in PGS Catalogue as of June 2026
+
 
 def render_step2_upload() -> None:
     """
@@ -435,15 +518,18 @@ def render_step2_upload() -> None:
     with st.expander("How do I download a harmonized PGS file?", expanded=False):
         st.markdown(
             """
-1. Go to the [PGS Catalog](https://www.pgscatalog.org/) and find your score (e.g. `PGS000014`).
-2. Open its **Download Score** section.
+1. Go to the **[PGS Catalog](https://www.pgscatalog.org/)** and find your score (e.g. `PGS000014`). 
+You can also search the Catalog by publication (author name, journal, PGP ID, or PubMed ID).\n
+2. Open its **Download Score** section.\n
 3. Navigate to the **Harmonized** tab folder.
+""")    
+        st.markdown("""
 4. Download the **harmonized** scoring file. Filename ends in `_hmPOS_GRCh38.txt.gz`
-   or `_hmPOS_GRCh37.txt.gz`, depending on build.
-5. Download the optional corresponding MD5 file if you want to verify the download's integrity.
-6. No need to unzip. Upload the `.txt.gz` file directly below and the MD5 file if you have it.
-            """
-        )
+   or `_hmPOS_GRCh37.txt.gz`, depending on the genome build.""", help = "The genome build GRCh38 (hg38) and GRCh37 (hg19) specifies the reference human genome assembly used to define the chromosomal coordinates of the SNPs in the file. Be sure to download the harmonized version of the score  file for your desired genome build.")
+
+        st.markdown("5. Download the optional corresponding MD5 file if you want to verify the download's integrity.", help = "Optional. The .md5 / .txt checksum file from the PGS Catalog, "
+                 "used to confirm your download wasn't corrupted or truncated.")
+        st.markdown("6. No need to unzip. Upload the `.txt.gz` file directly below and the MD5 file if you have it. 200 Megabyte maximum file upload size.", help="PGS Grep can read the .gz zipped file type directly. No zipped files on the PGS Catalogue exceed 200 MB as of June 2026.")
 
     col_upload, col_md5 = st.columns([3, 2])
     with col_upload:
@@ -454,39 +540,48 @@ def render_step2_upload() -> None:
     with col_md5:
         st.markdown("**MD5 Checksum** *(optional)*")
         uploaded_md5 = st.file_uploader(
-            "Upload MD5", type=["md5", "txt"], key="md5_uploader",
+            "Upload MD5", type=["md5"], key="md5_uploader",
             label_visibility="collapsed",
         )
+    st.caption("200 MB maximum file size.")
 
     if uploaded_file is not None:
-        file_bytes = uploaded_file.read()
-        file_name = uploaded_file.name
+        if uploaded_file.size > MAX_PGS_FILE_SIZE_BYTES:
+            st.error(
+                f"**'{uploaded_file.name}' is "
+                f"{uploaded_file.size / (1024 * 1024):.1f} MB, which exceeds the 200 MB limit** "
+                "for this hosted demo. Please use a smaller/compressed file, or download and run "
+                "PGS Grep locally (see the note on the Welcome page) to remove this limit."
+            )
+        else:
+            file_bytes = uploaded_file.read()
+            file_name = uploaded_file.name
 
-        # ── File Upload Reset ────────────────────────────────────────────
-        # Compare a signature (name + content hash) of this upload against
-        # whatever was cached before. A mismatch means a genuinely new
-        # file has arrived, so every downstream result / cached value
-        # tied to the old file must be cleared out immediately.
-        signature = f"{file_name}:{compute_md5(file_bytes)}"
-        if signature != st.session_state["pgs_file_signature"]:
-            reset_downstream_state()
-            st.session_state["pgs_file_signature"] = signature
-            st.session_state["pgs_file_bytes"] = file_bytes
-            st.session_state["pgs_file_name"] = file_name
+            # ── File Upload Reset ────────────────────────────────────────
+            # Compare a signature (name + content hash) of this upload against
+            # whatever was cached before. A mismatch means a genuinely new
+            # file has arrived, so every downstream result / cached value
+            # tied to the old file must be cleared out immediately.
+            signature = f"{file_name}:{compute_md5(file_bytes)}"
+            if signature != st.session_state["pgs_file_signature"]:
+                reset_downstream_state()
+                st.session_state["pgs_file_signature"] = signature
+                st.session_state["pgs_file_bytes"] = file_bytes
+                st.session_state["pgs_file_name"] = file_name
 
-        if uploaded_md5 is not None:
-            md5_content = uploaded_md5.read().decode("utf-8", errors="replace")
-            expected_hash = parse_md5_file(md5_content)
-            actual_hash = compute_md5(file_bytes)
-            if expected_hash is None:
-                st.warning("Could not parse the MD5 file — skipping integrity check.")
-            elif actual_hash.lower() == expected_hash.lower():
-                st.success(f"MD5 verified: `{actual_hash}`")
-            else:
-                st.error(
-                    f"MD5 mismatch! Expected `{expected_hash}`, got `{actual_hash}`. "
-                    "The file may be corrupted — proceed with caution."
-                )
+            if uploaded_md5 is not None:
+                md5_content = uploaded_md5.read().decode("utf-8", errors="replace")
+                expected_hash = parse_md5_file(md5_content)
+                actual_hash = compute_md5(file_bytes)
+                if expected_hash is None:
+                    st.warning("Could not parse the MD5 file — skipping integrity check.")
+                elif actual_hash.lower() == expected_hash.lower():
+                    st.success(f"MD5 verified: `{actual_hash}`")
+                else:
+                    st.error(
+                        f"MD5 mismatch! Expected `{expected_hash}`, got `{actual_hash}`. "
+                        "The file may be corrupted — proceed with caution."
+                    )
 
     # Metadata preview + validation, using whatever is currently cached.
     if st.session_state["pgs_file_bytes"] is not None:
@@ -500,11 +595,28 @@ def render_step2_upload() -> None:
                 raw_build = preview_meta.get("hmpos_build", preview_meta.get("genome_build"))
                 if raw_build:
                     st.session_state["genome_build"] = normalize_build_label(raw_build)
+                # A harmonized file exposes an 'hmpos_build' field (from its
+                # hm_chr/hm_pos columns); a non-harmonized file typically
+                # doesn't, though the filename convention is checked too in
+                # case a file was renamed after download.
+                file_name_lower = (st.session_state["pgs_file_name"] or "").lower()
+                st.session_state["pgs_file_is_harmonized"] = bool(
+                    preview_meta.get("hmpos_build")
+                ) or "_hmpos_" in file_name_lower
             except Exception:
                 st.session_state["preview_metadata"] = None
+                st.session_state["pgs_file_is_harmonized"] = None
                 st.warning("Could not read metadata from this file, but you can still proceed.")
         if st.session_state["preview_metadata"]:
             render_metadata_card(st.session_state["preview_metadata"])
+        if st.session_state.get("pgs_file_is_harmonized") is False:
+            st.error(
+                "**This doesn't look like a harmonized PGS file.** No harmonized-build "
+                "metadata (`hm_pos`) was found, and the filename doesn't include `_hmPOS_`. "
+                "This app scans harmonized coordinates, so please re-download the "
+                "**harmonized** version of this score from the PGS Catalog's "
+                "'Harmonized' folder (see the instructions above) before continuing."
+            )
     else:
         st.info("Upload a file to continue.")
 
@@ -515,7 +627,10 @@ def render_step2_upload() -> None:
             go_to_prev_step()
             st.rerun()
     with col_next:
-        can_advance = st.session_state["pgs_file_bytes"] is not None
+        can_advance = (
+            st.session_state["pgs_file_bytes"] is not None
+            and st.session_state.get("pgs_file_is_harmonized") is not False
+        )
         if st.button("Next", type="primary", width='stretch', disabled=not can_advance):
             go_to_next_step()
             st.rerun()
@@ -534,8 +649,10 @@ def render_step3_rsid_guide() -> None:
     """
     st.header("Locate Your Target RSID")
     st.markdown(
-        "This tool searches by **chromosomal position**, not by rsID directly, "
-        "so you'll need to look up your target SNP's coordinates first."
+        "An **rsID** (e.g. `rs10305420`) is a unique reference ID assigned to a "
+        "specific SNP in NCBI's dbSNP database. This tool searches by "
+        "**chromosomal position**, not by rsID directly, so you'll need to look "
+        "up your target SNP's coordinates first."
     )
 
     detected_build = get_display_build(st.session_state["preview_metadata"])
@@ -627,8 +744,10 @@ def render_step4_5_ld_auth() -> None:
     """
     st.header("LDLink API Token")
     st.markdown(
-        "LD proxy lookups are powered by the **LDlink API**, which requires a "
-        "free personal access token."
+        "LD proxy lookups are powered by the **LDlink API**, a free service run "
+        "by the NIH's National Cancer Institute. It requires a personal access "
+        "token to authenticate requests and apply per-user rate limits — this "
+        "app only uses it to make LD queries on your behalf during this session."
     )
     st.markdown("[Get a free token here (ldlink.nih.gov)](https://ldlink.nih.gov/apiaccess)")
 
@@ -675,6 +794,9 @@ def render_step5_config() -> None:
     st.text_input(
         "Target rsID (must match center position)",
         key="target_rsid",
+        help="The rsID (e.g. rs10305420) you looked up in the previous step. "
+             "Used to label results and, if LD proxies are enabled, as the "
+             "query variant for the LDlink lookup.",
     )
 
     col_build, col_chr = st.columns(2)
@@ -684,19 +806,35 @@ def render_step5_config() -> None:
             "Genome Assembly",
             build_options,
             key="genome_build",
-            help="Auto-filled from your uploaded PGS file when available.",
+            help="The reference genome assembly your coordinates are in. "
+                 "Auto-filled from your uploaded PGS file when available — "
+                 "change it only if you looked up coordinates in a different build.",
         )
     with col_chr:
         st.number_input(
             "Chromosome #", min_value=1, max_value=25,
             key="chromosome",
+            help="The chromosome your target variant is on (1-22, 23=X, 24=Y, 25=MT).",
         )
 
-    st.number_input(
+    # A native st.number_input silently rejects pasted values that include
+    # thousands separators (e.g. "39,048,860", the format NCBI's Genome
+    # Data Viewer displays and that users naturally copy) — the browser's
+    # <input type="number"> just discards the whole paste. A text field
+    # with a small parsing callback accepts the paste and strips the
+    # commas itself, while still keeping 'target_pos' numeric everywhere
+    # else in the app.
+    st.text_input(
         "Center Position (target variant position)",
-        key="target_pos",
-        help="The scan searches for variants at this base-pair position, plus the window below.",
+        key="target_pos_text",
+        on_change=_sync_target_pos_from_text,
+        help="The base-pair position of your target variant, e.g. from NCBI's "
+             "Genome Data Viewer. You can paste it with or without comma "
+             "separators (e.g. 39048860 or 39,048,860). The scan searches "
+             "for variants at this position, plus the window below.",
     )
+    if not st.session_state["target_pos_text"].replace(",", "").replace(" ", "").strip().lstrip("-").isdigit():
+        st.caption("⚠️ Enter digits only (commas are fine) — using the last valid position for now.")
 
     st.subheader("Genomic Search Window")
     st.number_input(
@@ -712,26 +850,47 @@ def render_step5_config() -> None:
         f"{start_window:,} – {end_window:,}**"
     )
 
+    population_selected = True
     if wants_ld_proxies():
         st.subheader("LD Proxy Settings")
+        population_options = ["Choose...", "EUR", "AMR", "AFR", "EAS", "SAS"]
         st.selectbox(
             "LD Population (1000 Genomes)",
-            ["EUR", "AMR", "AFR", "EAS", "SAS"],
+            population_options,
             key="population",
-            help="EUR = European, AMR = Admixed American, AFR = African, EAS = East Asian, SAS = South Asian.",
+            help="The 1000 Genomes super-population used to calculate LD. This "
+                 "matters because LD patterns differ by ancestry — proxies "
+                 "strongly linked in one population may not be linked in "
+                 "another. EUR = European, AMR = Admixed American, "
+                 "AFR = African, EAS = East Asian, SAS = South Asian. "
+                 "Choose the population that best matches your study cohort.",
         )
+        population_selected = st.session_state["population"] != "Choose..."
+        if not population_selected:
+            st.warning("Please select an LD population before continuing.")
+
         st.radio(
             "Filter proxies by",
             ["R² only", "D′ only", "R² and D′ (both must pass)"],
             key="ld_metric",
-            help="R² measures correlation between alleles; D′ measures maximum possible LD.",
+            help="Which LD statistic(s) a candidate proxy must pass its threshold "
+                 "on to be kept. R² measures correlation between alleles; "
+                 "D′ measures maximum possible LD.",
         )
         use_r2 = st.session_state["ld_metric"] in ("R² only", "R² and D′ (both must pass)")
         use_dprime = st.session_state["ld_metric"] in ("D′ only", "R² and D′ (both must pass)")
         if use_r2:
-            st.slider("R² Threshold", 0.0, 1.0, step=0.05, key="r2_filter")
+            st.slider(
+                "R² Threshold", 0.0, 1.0, step=0.05, key="r2_filter",
+                help="Minimum R² (allele correlation) a candidate proxy must have "
+                     "with the target SNP to be kept. Higher = stricter, fewer proxies.",
+            )
         if use_dprime:
-            st.slider("D′ Threshold", 0.0, 1.0, step=0.05, key="dprime_filter")
+            st.slider(
+                "D′ Threshold", 0.0, 1.0, step=0.05, key="dprime_filter",
+                help="Minimum D′ (normalized LD coefficient) a candidate proxy must "
+                     "have with the target SNP to be kept. Higher = stricter, fewer proxies.",
+            )
 
     st.subheader("📋 Output Filtering")
     st.checkbox(
@@ -748,7 +907,7 @@ def render_step5_config() -> None:
             go_to_prev_step()
             st.rerun()
     with col_next:
-        if st.button("Next", type="primary", width='stretch'):
+        if st.button("Next", type="primary", width='stretch', disabled=not population_selected):
             go_to_next_step()
             st.rerun()
 

@@ -61,7 +61,7 @@ Contributions are welcome. Submit bug reports and feature requests through the r
 
 ## License (This needs to be revised)
 
-This project is licensed under the MIT License - see the `LICENSE.md` file for details.
+PGS Grep is released under the GNU General Public License v3.0 (GPL-3.0). You are free to reuse and modify this code under the terms of the GPL-3.0 license, but any derivative work must also be released under the same license. See details at https://www.gnu.org/licenses/gpl-3.0.html
 
 ## Acknowledgments
 
