@@ -480,7 +480,7 @@ def render_step2_upload() -> None:
     """
     st.header("📁 Get Your PGS File from the PGS Catalog")
 
-    with st.expander("How do I download a harmonized PGS file?", expanded=False):
+    with st.expander("ℹ️ How do I download a harmonized PGS file?", expanded=False):
         st.markdown(
             """
 1. Go to the **[PGS Catalog](https://www.pgscatalog.org/)** and find your score (e.g. `PGS000014`). 
@@ -503,7 +503,7 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
             "Upload file", type=["gz"], label_visibility="collapsed"
         )
     with col_md5:
-        st.markdown("**MD5 Checksum** *(optional)*")
+        st.markdown("**MD5 Checksum** *(optional)*", help = "Optional. The .md5 / .txt checksum file from the PGS Catalog is used to confirm your download wasn't corrupted or truncated.")
         uploaded_md5 = st.file_uploader(
             "Upload MD5", type=["md5"], key="md5_uploader",
             label_visibility="collapsed",
@@ -731,13 +731,13 @@ def render_step4_5_ld_auth() -> None:
     st.markdown(
         "LD proxy lookups are powered by the **LDlink API**, a free service run "
         "by the National Cancer Institute. It requires a personal access "
-        "token to authenticate requests and apply per-user rate limits — this "
+        "token to authenticate requests. This "
         "app only uses it to make LD queries on your behalf during this session."
-        "LDLink API Access Token**: this optional token can be obtained for free at [LDLink API](https://ldlink.nih.gov/apiaccess), hosted and developed by the National Cancer Institute (NCI), "
+    )
+    st.caption("LDLink API Access Token: this optional token can be obtained for free at [LDLink API](https://ldlink.nih.gov/apiaccess), hosted and developed by the National Cancer Institute (NCI), "
         "part of the U.S. National Institutes of Health (NIH). This token authenticates a request for LD proxy data from the LDLink database. "
         "Your token is never stored or shared. If you choose to provide one, it will only be used for LDLink's API calls. You can see how your token is "
-        "used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep-Public."
-    )
+        "used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep-Public.")
     st.markdown("[Get a free token here (ldlink.nih.gov)](https://ldlink.nih.gov/apiaccess)")
     
 
@@ -1041,7 +1041,7 @@ def render_results() -> None:
             <div style="background:#d4edda;border:2px solid #28a745;border-radius:8px;
                         padding:16px 20px;margin-bottom:12px;font-size:1.15rem;
                         font-weight:700;color:#155724;text-align:center;">
-              EXACT MATCH FOUND — {s['target_rsid']} at Chr{s['chromosome']}:{s['target_pos']:,}
+              EXACT MATCH FOUND: {s['target_rsid']} at Chr{s['chromosome']}:{s['target_pos']:,}
             </div>
             """,
             unsafe_allow_html=True,
@@ -1052,7 +1052,7 @@ def render_results() -> None:
             <div style="background:#cce5ff;border:2px solid #004085;border-radius:8px;
                         padding:16px 20px;margin-bottom:12px;font-size:1.1rem;
                         font-weight:700;color:#004085;text-align:center;">
-              PROXY MATCH — target absent at Chr{s['chromosome']}:{s['target_pos']:,}, but
+              PROXY MATCH: target absent at Chr{s['chromosome']}:{s['target_pos']:,}, but
               {len(proxy_matches)} LD-linked proxy variant(s) found in the window.
             </div>
             """,
