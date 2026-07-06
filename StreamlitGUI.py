@@ -1,4 +1,5 @@
 """
+R²
 PGS Grep Streamlit wizard UI.
 
 Architecture notes for developers:

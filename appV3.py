@@ -158,8 +158,8 @@ def build_output_header(
         target_rsid:       The queried rsID.
         population:        LD population code.
         genome_build:      Genome assembly string.
-        r2_threshold:      R² linkage filter applied, or None if not used.
-        dprime_threshold:  D′ linkage filter applied, or None if not used.
+        r2_threshold:      r^2 linkage filter applied, or None if not used.
+        dprime_threshold:  D' linkage filter applied, or None if not used.
 
     Returns:
         A multi-line string of '#'-prefixed comment lines.
@@ -232,9 +232,9 @@ class PGSScanEngine:
         """
         Parse LDlink API response text into a map of proxies.
 
-        Filters rows by whichever combination of R² / D′ thresholds are active.
+        Filters rows by whichever combination of r^2 / D' thresholds are active.
         Both thresholds must pass when both are provided.
-        Raw D′ values from LDlink can be negative (indicating repulsion phase LD);
+        Raw D' values from LDlink can be negative (indicating repulsion phase LD);
         we compare against the absolute value, which is standard practice.
         """
         ld_map: dict[int, dict] = {}
@@ -251,7 +251,7 @@ class PGSScanEngine:
         except ValueError:
             return ld_map
 
-        # D′ column is optional, gracefully absent in some LDlink responses
+        # D' column is optional, gracefully absent in some LDlink responses
         try:
             dprime_idx: int | None = headers.index("Dprime")
         except ValueError:
@@ -271,11 +271,11 @@ class PGSScanEngine:
                     except ValueError:
                         dprime_val = None
 
-                # Apply R² filter
+                # Apply r^2 filter
                 if r2_threshold is not None and r2_val < r2_threshold:
                     continue
 
-                # Apply D′ filter (skip row if D′ is required but unavailable)
+                # Apply D' filter (skip row if D' is required but unavailable)
                 if dprime_threshold is not None:
                     if dprime_val is None or dprime_val < dprime_threshold:
                         continue
@@ -308,8 +308,8 @@ class PGSScanEngine:
             target_rsid:      rsID to query (e.g. "rs10305420").
             genome_build:     "GRCh38" or "GRCh37".
             population:       1000 Genomes population code (e.g. "EUR").
-            r2_threshold:     Minimum R² to include a proxy, or None to skip R² filter.
-            dprime_threshold: Minimum |D′| to include a proxy, or None to skip D′ filter.
+            r2_threshold:     Minimum r^2 to include a proxy, or None to skip R² filter.
+            dprime_threshold: Minimum |D'| to include a proxy, or None to skip D' filter.
         """
         self.ld_map = {}
         cache_file  = self._cache_path(target_rsid, population, genome_build)
@@ -485,7 +485,7 @@ class PGSScanEngine:
                     exact_match = True
                 elif current_pos in self.ld_map:
                     p = self.ld_map[current_pos]
-                    # Include D′ in the label when it was fetched
+                    # Include D' in the label when it was fetched
                     if p.get("dprime") is not None:
                         status_flag = (
                             f"LD PROXY ({p['rsid']}, r^2={p['r2']:.3f}, D'={p['dprime']:.3f})"

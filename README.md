@@ -44,7 +44,7 @@ The script scans a PGS file for matching SNP entries and reports relevant coordi
 To run tests, run 
 ```
 pip install pytest pytest-mock requests
-python -m pytest test_pgs_explorer.py -v
+python -m pytest StreamlitTestSuite.py -v
 ```
 
 ## Built With
