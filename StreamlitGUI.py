@@ -28,8 +28,15 @@ def _sync_target_pos_from_text() -> None:
     rest of the app relies on. Invalid input is left in the text box
     as-is and simply doesn't update 'target_pos', so a bad paste can't
     silently corrupt the search window.
+
+    Reads from the widget's own key ('target_pos_text_widget') rather
+    than the durable 'target_pos_text' key, and immediately mirrors the
+    raw text into 'target_pos_text' too — see the durable/widget key
+    split explained in render_step5_config() for why the two are kept
+    separate.
     """
-    raw = st.session_state.get("target_pos_text", "")
+    raw = st.session_state.get("target_pos_text_widget", "")
+    st.session_state["target_pos_text"] = raw
     cleaned = raw.replace(",", "").replace(" ", "").strip()
     if cleaned.lstrip("-").isdigit():
         st.session_state["target_pos"] = int(cleaned)
@@ -741,13 +748,22 @@ def render_step4_5_ld_auth() -> None:
     )
     st.markdown("[Get a free token here (ldlink.nih.gov)](https://ldlink.nih.gov/apiaccess)")
 
+    # Same durable/widget key split used throughout Step 5 (see
+    # render_step5_config() for the full explanation): this widget only
+    # renders while the user is on this step, so its own state would be
+    # cleared by Streamlit the moment they move on (e.g. into Step 5/6)
+    # and back. The durable "ldlink_token" key — read later by
+    # run_scan() — is written explicitly on every render instead, so it
+    # survives regardless of whether this particular widget is mounted.
     st.text_input(
         "LDLink API Token",
+        value=st.session_state["ldlink_token"],
         type="password",
-        key="ldlink_token",
+        key="ldlink_token_widget",
         help="Your token is only used for this session's LDlink API calls. "
              "Identical queries are cached locally for future runs.",
     )
+    st.session_state["ldlink_token"] = st.session_state["ldlink_token_widget"]
 
     if not st.session_state["ldlink_token"].strip():
         st.warning("A token is required to fetch LD proxies. You can leave this blank and go Back to skip LD proxies instead.")
@@ -777,17 +793,40 @@ def render_step5_config() -> None:
     """
     st.header("Search Configuration")
 
+    # ── Durable vs widget keys ──────────────────────────────────────────
+    # Every field on this page is only ever drawn while the wizard is on
+    # the "config" step. Streamlit clears a widget's session_state entry
+    # the moment that widget stops being drawn on a rerun — so binding a
+    # widget's key= directly to the same name the rest of the app reads
+    # (e.g. "target_rsid") meant the value was wiped out as soon as the
+    # user moved on to Step 6 (or back to Step 4), and init_session_state()
+    # would then quietly reseed the field back to its default the next
+    # time this page rendered. (This is the exact bug already worked
+    # around for "want_ld_proxies" in render_step4_ld_choice() — the fix
+    # here follows the same pattern.)
+    #
+    # Each widget below is therefore bound to its own "*_widget" key
+    # (which is allowed to disappear/reset when this page isn't showing),
+    # and its value is copied into the durable key — "target_rsid",
+    # "genome_build", "chromosome", etc. — immediately after the widget is
+    # drawn. The durable key is a plain (non-widget) session_state entry,
+    # so it persists no matter which step is currently rendering, and it's
+    # what every other part of the app (scan summary, run_scan, CSV
+    # export) reads.
+
     st.subheader("Target Variant")
     st.caption(
         "Enter the chromosome and position you looked up in the previous step."
     )
     st.text_input(
         "Target rsID (must match center position)",
-        key="target_rsid",
+        value=st.session_state["target_rsid"],
+        key="target_rsid_widget",
         help="The rsID (e.g. rs10305420) you looked up in the previous step. "
              "Used to label results and, if LD proxies are enabled, as the "
              "query variant for the LDlink lookup.",
     )
+    st.session_state["target_rsid"] = st.session_state["target_rsid_widget"]
 
     col_build, col_chr = st.columns(2)
     with col_build:
@@ -795,27 +834,33 @@ def render_step5_config() -> None:
         st.selectbox(
             "Genome Assembly",
             build_options,
-            key="genome_build",
+            index=build_options.index(st.session_state["genome_build"]),
+            key="genome_build_widget",
             help="The reference genome assembly your coordinates are in. "
                  "Auto-filled from your uploaded PGS file when available — "
                  "change it only if you looked up coordinates in a different build.",
         )
+        st.session_state["genome_build"] = st.session_state["genome_build_widget"]
     with col_chr:
         st.number_input(
             "Chromosome #", min_value=1, max_value=25,
-            key="chromosome",
+            value=st.session_state["chromosome"],
+            key="chromosome_widget",
             help="The chromosome your target variant is on (1-22, 23=X, 24=Y, 25=MT).",
         )
+        st.session_state["chromosome"] = st.session_state["chromosome_widget"]
 
     st.text_input(
         "Center Position (target variant position)",
-        key="target_pos_text",
+        value=st.session_state["target_pos_text"],
+        key="target_pos_text_widget",
         on_change=_sync_target_pos_from_text,
         help="The base-pair position of your target variant, e.g. from NCBI's "
              "Genome Data Viewer. You can paste it with or without comma "
              "separators (e.g. 39048860 or 39,048,860). The scan searches "
              "for variants at this position, plus the window below.",
     )
+    st.session_state["target_pos_text"] = st.session_state["target_pos_text_widget"]
     if not st.session_state["target_pos_text"].replace(",", "").replace(" ", "").strip().lstrip("-").isdigit():
         st.caption("⚠️ Enter digits only (commas are fine)")
 
@@ -823,9 +868,11 @@ def render_step5_config() -> None:
     st.number_input(
         "Flanking Size (+/- base pairs)",
         step=1_000,
-        key="window_size",
+        value=st.session_state["window_size"],
+        key="window_size_widget",
         help="Creates a window this many base pairs on either side of the center position.",
     )
+    st.session_state["window_size"] = st.session_state["window_size_widget"]
     start_window = st.session_state["target_pos"] - st.session_state["window_size"]
     end_window = st.session_state["target_pos"] + st.session_state["window_size"]
     st.caption(
@@ -840,7 +887,8 @@ def render_step5_config() -> None:
         st.selectbox(
             "LD Population (1000 Genomes)",
             population_options,
-            key="population",
+            index=population_options.index(st.session_state["population"]),
+            key="population_widget",
             help="The 1000 Genomes super-population used to calculate LD. This "
                  "matters because LD patterns differ by ancestry — proxies "
                  "strongly linked in one population may not be linked in "
@@ -848,6 +896,7 @@ def render_step5_config() -> None:
                  "AFR = African, EAS = East Asian, SAS = South Asian. "
                  "Choose the population that best matches your study cohort.",
         )
+        st.session_state["population"] = st.session_state["population_widget"]
         population_selected = st.session_state["population"] != "Choose..."
         if not population_selected:
             st.warning("Please select an LD population before continuing.")
@@ -855,32 +904,40 @@ def render_step5_config() -> None:
         st.radio(
             "Filter proxies by",
             ["R² only", "D′ only", "R² and D′ (both must pass)"],
-            key="ld_metric",
+            index=["R² only", "D′ only", "R² and D′ (both must pass)"].index(st.session_state["ld_metric"]),
+            key="ld_metric_widget",
             help="Which LD statistic(s) a candidate proxy must pass its threshold "
                  "on to be kept. R² measures correlation between alleles; "
                  "D′ measures maximum possible LD.",
         )
+        st.session_state["ld_metric"] = st.session_state["ld_metric_widget"]
         use_r2 = st.session_state["ld_metric"] in ("R² only", "R² and D′ (both must pass)")
         use_dprime = st.session_state["ld_metric"] in ("D′ only", "R² and D′ (both must pass)")
         if use_r2:
             st.slider(
-                "R² Threshold", 0.0, 1.0, step=0.05, key="r2_filter",
+                "R² Threshold", 0.0, 1.0, step=0.05,
+                value=st.session_state["r2_filter"], key="r2_filter_widget",
                 help="Minimum R² (allele correlation) a candidate proxy must have "
                      "with the target SNP to be kept. Higher = stricter, fewer proxies.",
             )
+            st.session_state["r2_filter"] = st.session_state["r2_filter_widget"]
         if use_dprime:
             st.slider(
-                "D′ Threshold", 0.0, 1.0, step=0.05, key="dprime_filter",
+                "D′ Threshold", 0.0, 1.0, step=0.05,
+                value=st.session_state["dprime_filter"], key="dprime_filter_widget",
                 help="Minimum D′ (normalized LD coefficient) a candidate proxy must "
                      "have with the target SNP to be kept. Higher = stricter, fewer proxies.",
             )
+            st.session_state["dprime_filter"] = st.session_state["dprime_filter_widget"]
 
     st.checkbox(
         "Hide unlinked variants",
-        key="proxies_only",
+        value=st.session_state["proxies_only"],
+        key="proxies_only_widget",
         help="Hide variants in the window that are neither the exact target nor a qualifying LD proxy. "
              "Applies to both the on-screen table and the exported CSV.",
     )
+    st.session_state["proxies_only"] = st.session_state["proxies_only_widget"]
 
     st.write("")
     col_back, col_next = st.columns(2)
