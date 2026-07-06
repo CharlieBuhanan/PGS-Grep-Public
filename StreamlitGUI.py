@@ -1,3 +1,23 @@
+"""
+PGS Grep Streamlit wizard UI.
+
+Architecture notes for developers:
+
+- Widget/durable key pattern: any input widget that is only mounted on a
+  single wizard step has its own "*_widget" session_state key. Streamlit
+  drops a widget's session_state entry the moment that widget stops being
+  drawn on a rerun, so binding a widget's key= directly to the value the
+  rest of the app reads would wipe that value out as soon as the user
+  navigated away from the step. Each widget's value is therefore copied,
+  immediately after the widget is drawn, into a separate durable key
+  (e.g. "target_rsid", "chromosome", "target_pos") that is a plain
+  session_state entry and persists regardless of which step is currently
+  rendering. It's the durable key that the rest of the app (scan summary,
+  run_scan, CSV export, and the read-only restatement in Step 5) reads.
+- Custom typography/CSS below relies on Roboto being served locally from
+  ./static/ (requires enableStaticServing=true in .streamlit/config.toml).
+"""
+
 import hashlib
 import io
 import os
@@ -8,10 +28,6 @@ import streamlit as st  # type: ignore
 import appV3
 import constants
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def compute_md5(file_bytes: bytes) -> str:
     """Return the MD5 hex digest of raw file bytes."""
@@ -31,9 +47,8 @@ def _sync_target_pos_from_text() -> None:
 
     Reads from the widget's own key ('target_pos_text_widget') rather
     than the durable 'target_pos_text' key, and immediately mirrors the
-    raw text into 'target_pos_text' too — see the durable/widget key
-    split explained in render_step5_config() for why the two are kept
-    separate.
+    raw text into 'target_pos_text' too, per the durable/widget key
+    split described in the module docstring.
     """
     raw = st.session_state.get("target_pos_text_widget", "")
     st.session_state["target_pos_text"] = raw
@@ -52,15 +67,19 @@ def parse_md5_file(md5_content: str) -> str | None:
 
 
 def render_metadata_card(metadata: dict) -> None:
-    """Render a compact info card for PGS file metadata in the Streamlit UI."""
+    """
+    Render a compact info card for PGS file metadata in the Streamlit UI.
+
+    Prefers the harmonized build ('hmpos_build'), which reflects the
+    actual coordinates in this file (hm_chr/hm_pos). The legacy
+    'genome_build' field records the original study's assembly instead,
+    which is often GRCh37 even in a file harmonized to GRCh38, so it's
+    only used as a fallback when hmpos_build is absent (e.g. older V1
+    files).
+    """
     pgs_id = metadata.get("pgs_id", "N/A")
     name = metadata.get("pgs_name", metadata.get("trait_mapped", "N/A"))
     trait = metadata.get("trait_efo", metadata.get("trait_efo_id", "N/A"))
-    # Prefer the harmonized build (hmpos_build): it reflects the actual
-    # coordinates in this file (hm_chr/hm_pos). The legacy 'genome_build'
-    # field instead records the original study's assembly, which is often
-    # GRCh37 even in a file harmonized to GRCh38, so it's only used as a
-    # fallback when hmpos_build is absent (e.g. older V1 files).
     build = metadata.get("hmpos_build", metadata.get("genome_build", "N/A"))
     citation = metadata.get("citation", "N/A")
     pgp_id = metadata.get("pgp_id", "N/A")
@@ -120,10 +139,6 @@ def reset_downstream_state() -> None:
     st.session_state["preview_metadata"] = None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Session state
-# ─────────────────────────────────────────────────────────────────────────────
-
 STEP_ORDER = ["welcome", "upload", "rsid_guide", "ld_choice", "ld_auth", "config", "execute"]
 STEP_DISPLAY_NUMBER = {
     "welcome": "1",
@@ -137,41 +152,37 @@ STEP_DISPLAY_NUMBER = {
 STEP_TITLE = {
     "welcome": "Welcome",
     "upload": "Upload File",
-    "rsid_guide": "Locate Your RSID",
+    "rsid_guide": "Locate & Enter Target SNP",
     "ld_choice": "LD Proxies?",
     "ld_auth": "API Token",
     "config": "Search Setup",
     "execute": "Results",
 }
-TOTAL_STEPS = 6  # counts the conditional 4.5 step as part of step 4
+TOTAL_STEPS = 6
 
 
 def init_session_state() -> None:
     """Populate st.session_state with default values the first time the app runs."""
     defaults = {
         "wizard_step": "welcome",
-        # Step 2 — file acquisition
         "pgs_file_bytes": None,
         "pgs_file_name": None,
         "pgs_file_signature": None,
         "pgs_file_is_harmonized": None,
         "preview_metadata": None,
-        # Step 3 / 3.5 — LD proxies
         "want_ld_proxies": "No, scan target position only",
         "ldlink_token": "",
-        # Step 4 — search configuration
         "target_rsid": "rs10305420",
         "genome_build": "GRCh38",
         "population": "Choose...",
         "chromosome": 6,
         "target_pos": 39_048_860,
         "target_pos_text": "39,048,860",
-        "window_size": 10_000,
+        "window_size": 5_000,
         "ld_metric": "R² only",
         "r2_filter": 0.7,
         "dprime_filter": 0.8,
         "proxies_only": True,
-        # Step 5 — results cache
         "scan_results": None,
     }
     for key, value in defaults.items():
@@ -189,9 +200,9 @@ def go_to_next_step() -> None:
     Advance the wizard to the next step in the fixed STEP_ORDER sequence,
     automatically skipping over 'ld_auth' when LD proxies are disabled.
 
-    STEP_ORDER never changes shape (unlike the old dynamically-filtered
-    list), so st.session_state["wizard_step"] is always a valid member of
-    it and STEP_ORDER.index(...) can never raise ValueError.
+    STEP_ORDER never changes shape (unlike a dynamically-filtered list),
+    so st.session_state["wizard_step"] is always a valid member of it and
+    STEP_ORDER.index(...) can never raise ValueError.
     """
     idx = STEP_ORDER.index(st.session_state["wizard_step"]) + 1
     while idx < len(STEP_ORDER) and STEP_ORDER[idx] == "ld_auth" and not wants_ld_proxies():
@@ -215,23 +226,19 @@ def go_to_prev_step() -> None:
 
 
 def render_progress_indicator() -> None:
-    """Draw a slim progress bar + 'Step X of Y' caption at the top of the wizard."""
+    """
+    Draw a slim progress bar + 'Step X of Y' caption at the top of the
+    wizard. Uses the fixed step numbering (STEP_DISPLAY_NUMBER /
+    TOTAL_STEPS) rather than deriving a fraction from position-in-sequence,
+    since whether 'ld_auth' is visited or skipped depends on the LD-proxies
+    Yes/No choice and would otherwise make the fraction jump around while
+    sitting still on the same step.
+    """
     current = st.session_state["wizard_step"]
-    # Use the fixed step numbering (STEP_DISPLAY_NUMBER / TOTAL_STEPS)
-    # rather than deriving a fraction from position-in-sequence. Whether
-    # 'ld_auth' is visited or skipped depends on the LD-proxies Yes/No
-    # choice, which would make a position-based fraction jump around even
-    # while sitting still on the same step. Step numbers, including the
-    # fractional "4.5", are fixed regardless of that choice, so the bar
-    # advances monotonically no matter what's toggled.
     fraction = float(STEP_DISPLAY_NUMBER[current]) / TOTAL_STEPS
     st.progress(min(fraction, 1.0))
     st.caption(f"Step {STEP_DISPLAY_NUMBER[current]} of {TOTAL_STEPS} &nbsp;·&nbsp; **{STEP_TITLE[current]}**")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Page config
-# ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(
     page_title="PGS Grep",
@@ -239,8 +246,6 @@ st.set_page_config(
     page_icon="🧬",
 )
 
-# Custom typography, layout width, and visual polish.
-# Fonts: Roboto is served locally from ./static/ (enableStaticServing=true in config.toml).
 st.markdown(
     """
     <style>
@@ -273,11 +278,6 @@ st.markdown(
         font-display: swap;
     }
 
-    /* ---- Typography ------------------------------------------------- */
-    /* Note: icon elements (e.g. the expander arrow, which Streamlit renders
-       via a ligature-based icon font) are excluded from this override.
-       Forcing Roboto onto them breaks the ligature and prints the raw
-       icon name ("keyboard_arrow_right" etc.) as overlapping text. */
     html, body, [class*="css"], .stApp, .stMarkdown, .stApp p,
     .stApp span:not([data-testid="stIconMaterial"]),
     .stApp label, .stApp div {
@@ -293,20 +293,17 @@ st.markdown(
         color: #1a2b4c;
     }
 
-    /* ---- Widen the content column by ~15% ---------------------------- */
     .block-container {
         max-width: 840px;
         padding-top: 2.2rem;
         padding-bottom: 3rem;
     }
 
-    /* ---- App title / caption ------------------------------------------ */
     [data-testid="stAppViewContainer"] h1 {
         font-weight: 800 !important;
         color: #000000;
     }
 
-    /* ---- Buttons -------------------------------------------------- */
     div.stButton > button {
         padding: 0.62em 1.5em;
         font-size: 1.02rem;
@@ -327,15 +324,10 @@ st.markdown(
         box-shadow: 0 2px 6px rgba(16, 24, 40, 0.12);
     }
 
-    /* ---- File uploaders: force equal height regardless of column width
-       (the PGS and MD5 dropzones sit in unequal-width columns, and their
-       helper text — "GZ" vs "MD5, TXT" — can wrap differently, making the
-       two boxes render at different heights without this). ------------- */
     div[data-testid="stFileUploaderDropzone"] {
         min-height: 112px;
     }
 
-    /* ---- Inputs, selects, radios ------------------------------------- */
     div[data-testid="stTextInput"] input,
     div[data-testid="stNumberInput"] input,
     div[data-testid="stSelectbox"] div[data-baseweb="select"] {
@@ -349,7 +341,6 @@ st.markdown(
         gap: 0.35rem;
     }
 
-    /* ---- Cards: expanders / info / warning / success boxes ------------ */
     div[data-testid="stExpander"] {
         border-radius: 12px;
         border: 1px solid #e3e8f0;
@@ -360,7 +351,6 @@ st.markdown(
         padding: 0.9rem 1.1rem;
     }
 
-    /* ---- Metrics -------------------------------------------------- */
     div[data-testid="stMetric"] {
         background: #f7f9fc;
         border: 1px solid #e3e8f0;
@@ -368,7 +358,6 @@ st.markdown(
         padding: 0.8rem 1rem;
     }
 
-    /* ---- Headers get a touch more breathing room ---------------------- */
     h2, h3 {
         margin-top: 1.4rem;
     }
@@ -376,12 +365,10 @@ st.markdown(
         margin: 1.6rem 0;
     }
 
-    /* ---- Progress bar ------------------------------------------------ */
     div[data-testid="stProgress"] > div > div {
         border-radius: 8px;
     }
 
-    /* ---- Corner credit caption ----------------------------------------- */
     #app-credit-caption {
         position: fixed;
         bottom: 6px;
@@ -415,10 +402,6 @@ st.caption(
 render_progress_indicator()
 st.divider()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 1: Welcome & Requirements (Start Page)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def render_step1_welcome() -> None:
     """
@@ -483,19 +466,17 @@ used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 2: File Acquisition & Upload
-# ─────────────────────────────────────────────────────────────────────────────
-
-MAX_PGS_FILE_SIZE_BYTES = 200 * 1024 * 1024  # No zipped PGS file exceeds 200 MB in PGS Catalogue as of June 2026
+MAX_PGS_FILE_SIZE_BYTES = 200 * 1024 * 1024
 
 
 def render_step2_upload() -> None:
     """
     Guide the user to download a harmonized PGS file, let them upload it,
     validate it, and cache the raw bytes plus a metadata preview in
-    session_state. Detects newly-uploaded files and clears any stale
-    downstream results so they can never be mixed with a new source file.
+    session_state. Detects newly-uploaded files by comparing a signature
+    (name + content hash) against whatever was cached before; a mismatch
+    clears every downstream result tied to the old file so it can never
+    be mixed with a new source file.
     """
     st.header("📁 Get Your PGS File from the PGS Catalog")
 
@@ -541,11 +522,6 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
             file_bytes = uploaded_file.read()
             file_name = uploaded_file.name
 
-            # ── File Upload Reset ────────────────────────────────────────
-            # Compare a signature (name + content hash) of this upload against
-            # whatever was cached before. A mismatch means a genuinely new
-            # file has arrived, so every downstream result / cached value
-            # tied to the old file must be cleared out immediately.
             signature = f"{file_name}:{compute_md5(file_bytes)}"
             if signature != st.session_state["pgs_file_signature"]:
                 reset_downstream_state()
@@ -567,7 +543,6 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
                         "The file may be corrupted, proceed with caution."
                     )
 
-    # Metadata preview + validation, using whatever is currently cached.
     if st.session_state["pgs_file_bytes"] is not None:
         st.success(f"📄 File ready: `{st.session_state['pgs_file_name']}`")
         if st.session_state["preview_metadata"] is None:
@@ -575,14 +550,9 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
                 preview_file = io.BytesIO(st.session_state["pgs_file_bytes"])
                 preview_meta = appV3.extract_pgs_metadata(preview_file)
                 st.session_state["preview_metadata"] = preview_meta
-                # Auto-map genome build from file metadata for later steps.
                 raw_build = preview_meta.get("hmpos_build", preview_meta.get("genome_build"))
                 if raw_build:
                     st.session_state["genome_build"] = normalize_build_label(raw_build)
-                # A harmonized file exposes an 'hmpos_build' field (from its
-                # hm_chr/hm_pos columns); a non-harmonized file typically
-                # doesn't, though the filename convention is checked too in
-                # case a file was renamed after download.
                 file_name_lower = (st.session_state["pgs_file_name"] or "").lower()
                 st.session_state["pgs_file_is_harmonized"] = bool(
                     preview_meta.get("hmpos_build")
@@ -619,16 +589,19 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
             st.rerun()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 3: RSID Location Guide
-# ─────────────────────────────────────────────────────────────────────────────
-
 def render_step3_rsid_guide() -> None:
     """
     Help the user find the physical genomic coordinates (chromosome +
     base-pair position) of their target RSID, using the genome build
     parsed from the PGS file they just uploaded as the correct reference
-    assembly to select in NCBI's Genome Data Viewer.
+    assembly to select in NCBI's Genome Data Viewer, then collect the
+    target rsID, chromosome, and center position directly on this step.
+
+    These three fields are bound to durable session_state keys
+    ("target_rsid", "chromosome", "target_pos"/"target_pos_text") via the
+    widget/durable key split described in the module docstring, so their
+    values survive navigating to other steps or triggering a script
+    rerun, and are later restated read-only in Step 5.
     """
     st.header("Locate Your Target RSID")
     st.markdown(
@@ -649,7 +622,7 @@ def render_step3_rsid_guide() -> None:
    Coordinates differ between assemblies, so using the wrong one will point you
    to the wrong position.
 4. Note down the **chromosome number** and **base-pair position** shown for
-   that assembly, or keep the tab open. You'll need this when setting the search window.
+   that assembly, or keep the tab open. You'll need this to fill in the fields below.
         """
     )
 
@@ -661,6 +634,42 @@ def render_step3_rsid_guide() -> None:
     else:
         st.info(f"Detected genome build from your uploaded file: **{detected_build}**")
 
+    st.subheader("Target Variant")
+    st.caption("Enter the rsID, chromosome, and position you looked up above. Default values are shown for rs10305420 as an example.")
+
+    st.text_input(
+        "Target rsID (must match center position)",
+        value=st.session_state["target_rsid"],
+        key="target_rsid_widget",
+        help="The rsID (e.g. rs10305420) you looked up above. Used to label "
+             "results and, if LD proxies are enabled, as the query variant "
+             "for the LDlink lookup.",
+    )
+    st.session_state["target_rsid"] = st.session_state["target_rsid_widget"]
+
+    st.number_input(
+        "Chromosome #", min_value=1, max_value=25,
+        value=st.session_state["chromosome"],
+        key="chromosome_widget",
+        help="The chromosome your target variant is on (1-22, 23=X, 24=Y, 25=MT).",
+    )
+    st.session_state["chromosome"] = st.session_state["chromosome_widget"]
+
+    st.text_input(
+        "Center Position (target variant position)",
+        value=st.session_state["target_pos_text"],
+        key="target_pos_text_widget",
+        on_change=_sync_target_pos_from_text,
+        help="The base-pair position of your target variant, e.g. from NCBI's "
+             "Genome Data Viewer. You can paste it with or without comma "
+             "separators (e.g. 39048860 or 39,048,860). The scan searches "
+             "for variants at this position, plus a window configured later.",
+    )
+    st.session_state["target_pos_text"] = st.session_state["target_pos_text_widget"]
+    position_valid = st.session_state["target_pos_text"].replace(",", "").replace(" ", "").strip().lstrip("-").isdigit()
+    if not position_valid:
+        st.caption("⚠️ Enter digits only (commas are fine)")
+
     st.write("")
     col_back, col_next = st.columns(2)
     with col_back:
@@ -668,14 +677,11 @@ def render_step3_rsid_guide() -> None:
             go_to_prev_step()
             st.rerun()
     with col_next:
-        if st.button("Next", type="primary", width='stretch'):
+        can_advance = bool(st.session_state["target_rsid"].strip()) and position_valid
+        if st.button("Next", type="primary", width='stretch', disabled=not can_advance):
             go_to_next_step()
             st.rerun()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 4: LD Proxy Selection
-# ─────────────────────────────────────────────────────────────────────────────
 
 def render_step4_ld_choice() -> None:
     """
@@ -692,20 +698,6 @@ similar genetic signal.
         """
     )
 
-    # IMPORTANT: the widget's own key ("want_ld_proxies_widget") is NOT the
-    # same key the rest of the app reads (st.session_state["want_ld_proxies"]).
-    # Streamlit only keeps a widget-key entry in session_state while that
-    # widget is actually being drawn on the current page. Since this radio
-    # only renders on the ld_choice step, binding it directly to
-    # "want_ld_proxies" via key= caused the value to vanish from
-    # session_state the moment the wizard moved on to ld_auth/config — at
-    # which point init_session_state()'s "set default if missing" fallback
-    # quietly re-seeded it back to "No", so wants_ld_proxies() came back
-    # False again on every later step no matter what was picked here.
-    # Storing the durable value under a separate key (written explicitly
-    # below, every time this page renders) fixes that: "want_ld_proxies"
-    # now persists as ordinary session state regardless of whether this
-    # widget is currently mounted.
     ld_proxy_options = [
         "No, scan target position only",
         "Yes, also search LD proxies (requires a free token)",
@@ -730,10 +722,6 @@ similar genetic signal.
             st.rerun()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 4.5: LDLink API Authentication (Conditional)
-# ─────────────────────────────────────────────────────────────────────────────
-
 def render_step4_5_ld_auth() -> None:
     """
     Shown only when the user opted into LD proxy search in Step 4.
@@ -745,16 +733,14 @@ def render_step4_5_ld_auth() -> None:
         "by the National Cancer Institute. It requires a personal access "
         "token to authenticate requests and apply per-user rate limits — this "
         "app only uses it to make LD queries on your behalf during this session."
+        "LDLink API Access Token**: this optional token can be obtained for free at [LDLink API](https://ldlink.nih.gov/apiaccess), hosted and developed by the National Cancer Institute (NCI), "
+        "part of the U.S. National Institutes of Health (NIH). This token authenticates a request for LD proxy data from the LDLink database. "
+        "Your token is never stored or shared. If you choose to provide one, it will only be used for LDLink's API calls. You can see how your token is "
+        "used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep-Public."
     )
     st.markdown("[Get a free token here (ldlink.nih.gov)](https://ldlink.nih.gov/apiaccess)")
+    
 
-    # Same durable/widget key split used throughout Step 5 (see
-    # render_step5_config() for the full explanation): this widget only
-    # renders while the user is on this step, so its own state would be
-    # cleared by Streamlit the moment they move on (e.g. into Step 5/6)
-    # and back. The durable "ldlink_token" key — read later by
-    # run_scan() — is written explicitly on every render instead, so it
-    # survives regardless of whether this particular widget is mounted.
     st.text_input(
         "LDLink API Token",
         value=st.session_state["ldlink_token"],
@@ -781,88 +767,57 @@ def render_step4_5_ld_auth() -> None:
             st.rerun()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 5: Genomic Window & Search Configurations
-# ─────────────────────────────────────────────────────────────────────────────
-
 def render_step5_config() -> None:
     """
-    Collect the target SNP, genomic search window, LD thresholds (if
-    applicable), and output filtering preferences. Genome build is
+    Restate the target rsID, chromosome, position, and detected genome
+    build collected in Step 3 as read-only fields, then collect the
+    genomic search window, LD thresholds (if applicable), and output
+    filtering preferences. The genome build used for the scan is
     pre-filled from Step 2's metadata extraction when available.
     """
     st.header("Search Configuration")
 
-    # ── Durable vs widget keys ──────────────────────────────────────────
-    # Every field on this page is only ever drawn while the wizard is on
-    # the "config" step. Streamlit clears a widget's session_state entry
-    # the moment that widget stops being drawn on a rerun — so binding a
-    # widget's key= directly to the same name the rest of the app reads
-    # (e.g. "target_rsid") meant the value was wiped out as soon as the
-    # user moved on to Step 6 (or back to Step 4), and init_session_state()
-    # would then quietly reseed the field back to its default the next
-    # time this page rendered. (This is the exact bug already worked
-    # around for "want_ld_proxies" in render_step4_ld_choice() — the fix
-    # here follows the same pattern.)
-    #
-    # Each widget below is therefore bound to its own "*_widget" key
-    # (which is allowed to disappear/reset when this page isn't showing),
-    # and its value is copied into the durable key — "target_rsid",
-    # "genome_build", "chromosome", etc. — immediately after the widget is
-    # drawn. The durable key is a plain (non-widget) session_state entry,
-    # so it persists no matter which step is currently rendering, and it's
-    # what every other part of the app (scan summary, run_scan, CSV
-    # export) reads.
-
     st.subheader("Target Variant")
-    st.caption(
-        "Enter the chromosome and position you looked up in the previous step."
-    )
+    st.caption("Set in the previous step. Go Back to change these values.")
+
     st.text_input(
-        "Target rsID (must match center position)",
+        "Target rsID",
         value=st.session_state["target_rsid"],
-        key="target_rsid_widget",
-        help="The rsID (e.g. rs10305420) you looked up in the previous step. "
-             "Used to label results and, if LD proxies are enabled, as the "
-             "query variant for the LDlink lookup.",
+        disabled=True,
     )
-    st.session_state["target_rsid"] = st.session_state["target_rsid_widget"]
 
     col_build, col_chr = st.columns(2)
     with col_build:
-        build_options = ["GRCh38", "GRCh37"]
-        st.selectbox(
-            "Genome Assembly",
-            build_options,
-            index=build_options.index(st.session_state["genome_build"]),
-            key="genome_build_widget",
-            help="The reference genome assembly your coordinates are in. "
-                 "Auto-filled from your uploaded PGS file when available — "
-                 "change it only if you looked up coordinates in a different build.",
+        st.text_input(
+            "Detected Genome Build (from harmonized file)",
+            value=get_display_build(st.session_state["preview_metadata"]),
+            disabled=True,
         )
-        st.session_state["genome_build"] = st.session_state["genome_build_widget"]
     with col_chr:
         st.number_input(
-            "Chromosome #", min_value=1, max_value=25,
+            "Chromosome #",
             value=st.session_state["chromosome"],
-            key="chromosome_widget",
-            help="The chromosome your target variant is on (1-22, 23=X, 24=Y, 25=MT).",
+            disabled=True,
         )
-        st.session_state["chromosome"] = st.session_state["chromosome_widget"]
 
     st.text_input(
         "Center Position (target variant position)",
-        value=st.session_state["target_pos_text"],
-        key="target_pos_text_widget",
-        on_change=_sync_target_pos_from_text,
-        help="The base-pair position of your target variant, e.g. from NCBI's "
-             "Genome Data Viewer. You can paste it with or without comma "
-             "separators (e.g. 39048860 or 39,048,860). The scan searches "
-             "for variants at this position, plus the window below.",
+        value=f"{st.session_state['target_pos']:,}",
+        disabled=True,
     )
-    st.session_state["target_pos_text"] = st.session_state["target_pos_text_widget"]
-    if not st.session_state["target_pos_text"].replace(",", "").replace(" ", "").strip().lstrip("-").isdigit():
-        st.caption("⚠️ Enter digits only (commas are fine)")
+
+    st.subheader("Genome Assembly")
+    build_options = ["GRCh38", "GRCh37"]
+    st.selectbox(
+        "Genome Assembly Used for Search",
+        build_options,
+        index=build_options.index(st.session_state["genome_build"]),
+        key="genome_build_widget",
+        help="The reference genome assembly your coordinates are in. "
+             "Auto-filled from your uploaded PGS file when available — "
+             "change it only if you looked up coordinates in a different build.",
+    )
+    st.session_state["genome_build"] = st.session_state["genome_build_widget"]
 
     st.subheader("Genomic Search Window")
     st.number_input(
@@ -951,10 +906,6 @@ def render_step5_config() -> None:
             st.rerun()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 6: Execution, Caching & Download
-# ─────────────────────────────────────────────────────────────────────────────
-
 def render_scan_summary() -> None:
     """Print a plain-language summary of every configuration choice before running the scan."""
     s = st.session_state
@@ -1023,12 +974,6 @@ def run_scan() -> None:
         progress_bar = st.progress(0, text="Starting scan…")
         progress_status = st.empty()
 
-        # Cap displayed progress just below 100% during the scan itself —
-        # execute_scan() may report a percent_complete that reaches (or
-        # briefly exceeds, near the edge of the window) 1.0 well before
-        # the underlying read/parse loop has actually finished, which
-        # previously made the bar show "done" prematurely. The bar is
-        # only ever set to a true 1.0 after execute_scan() returns below.
         PROGRESS_CAP = 0.99
 
         def on_scan_progress(current_pos: int, percent_complete: float, variants_found: int) -> None:
@@ -1039,14 +984,14 @@ def run_scan() -> None:
                 current_pos:       Base-pair position currently being read.
                 percent_complete:  Fraction (0.0-1.0) of the way through the search window.
                 variants_found:    Number of matching variants found so far.
+
+            Displayed position is clamped to the search window because the
+            backend's read/parse loop can occasionally report a position
+            past end_window (e.g. a final buffered read overshooting the
+            window edge).
             """
             clamped = max(0.0, min(PROGRESS_CAP, percent_complete))
             pct = int(clamped * 100)
-            # current_pos comes from the backend's read/parse loop and can
-            # occasionally report a position past end_window (e.g. a final
-            # buffered read that overshoots the window edge). Clamp what's
-            # displayed to the actual search window so the text never shows
-            # a coordinate outside the range it claims to be scanning.
             display_pos = max(start_window, min(current_pos, end_window))
             progress_bar.progress(
                 clamped,
@@ -1064,12 +1009,10 @@ def run_scan() -> None:
             target_rsid=s["target_rsid"],
             progress_callback=on_scan_progress,
         )
-        # Only now, after execute_scan() has truly returned, do we mark the bar complete.
         progress_bar.progress(1.0, text="Scan complete!")
 
     status_placeholder.empty()
 
-    # Cache results so a stray widget interaction doesn't lose them.
     s["scan_results"] = {
         "exact_match": exact_match,
         "proxy_matches": proxy_matches,
@@ -1159,11 +1102,6 @@ def render_results() -> None:
         styled = display_df.style.map(highlight_status, subset=["Match_Status"])
         st.dataframe(styled, width='stretch', hide_index=True)
 
-    # ── CSV metadata injection ──────────────────────────────────────────
-    # A greyed-out / commented credit line is prepended ahead of the
-    # existing metadata header comments produced by appV3.build_output_header.
-    # The GitHub download URL shown in the on-screen corner caption is
-    # deliberately excluded from this exported line.
     csv_credit_line = "# Charlie Buhanan, PGS Grep V1.1, 2026\n"
     header_comments = appV3.build_output_header(
         metadata=last_metadata,
@@ -1210,10 +1148,6 @@ def render_step6_execute() -> None:
         go_to_prev_step()
         st.rerun()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Router
-# ─────────────────────────────────────────────────────────────────────────────
 
 STEP_RENDERERS = {
     "welcome": render_step1_welcome,
