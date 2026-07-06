@@ -685,17 +685,31 @@ similar genetic signal.
         """
     )
 
-    # Bound directly to session_state via key= (rather than reassigning
-    # st.session_state["want_ld_proxies"] from the widget's return value
-    # while also recomputing `index` from that same variable every rerun).
-    # That dual read/write pattern raced with Streamlit's own widget-state
-    # sync and was the source of the erratic progress bar / stalled
-    # navigation buttons when toggling this choice.
-    st.radio(
+    # IMPORTANT: the widget's own key ("want_ld_proxies_widget") is NOT the
+    # same key the rest of the app reads (st.session_state["want_ld_proxies"]).
+    # Streamlit only keeps a widget-key entry in session_state while that
+    # widget is actually being drawn on the current page. Since this radio
+    # only renders on the ld_choice step, binding it directly to
+    # "want_ld_proxies" via key= caused the value to vanish from
+    # session_state the moment the wizard moved on to ld_auth/config — at
+    # which point init_session_state()'s "set default if missing" fallback
+    # quietly re-seeded it back to "No", so wants_ld_proxies() came back
+    # False again on every later step no matter what was picked here.
+    # Storing the durable value under a separate key (written explicitly
+    # below, every time this page renders) fixes that: "want_ld_proxies"
+    # now persists as ordinary session state regardless of whether this
+    # widget is currently mounted.
+    ld_proxy_options = [
+        "No, scan target position only",
+        "Yes, also search LD proxies (requires a free token)",
+    ]
+    selection = st.radio(
         "Would you like to search for LD Proxies?",
-        ["No, scan target position only", "Yes, also search LD proxies (requires a free token)"],
-        key="want_ld_proxies",
+        ld_proxy_options,
+        index=ld_proxy_options.index(st.session_state["want_ld_proxies"]),
+        key="want_ld_proxies_widget",
     )
+    st.session_state["want_ld_proxies"] = selection
 
     st.write("")
     col_back, col_next = st.columns(2)
@@ -820,7 +834,7 @@ def render_step5_config() -> None:
     )
 
     population_selected = True
-    if wants_ld_proxies(): # BUG, THIS IS NOT SHOWING AT ALL, NEED TO FIX
+    if wants_ld_proxies():
         st.subheader("LD Proxy Settings")
         population_options = ["Choose...", "EUR", "AMR", "AFR", "EAS", "SAS"]
         st.selectbox(
