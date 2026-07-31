@@ -305,7 +305,7 @@ class PGSScanEngine:
         cached unfiltered so threshold changes don't require a new API call.
 
         Args:
-            target_rsid:      rsID to query (e.g. "rs10305420").
+            target_rsid:      rsID to query (e.g. "rs1260326").
             genome_build:     "GRCh38" or "GRCh37".
             population:       1000 Genomes population code (e.g. "EUR").
             r2_threshold:     Minimum r^2 to include a proxy, or None to skip R² filter.

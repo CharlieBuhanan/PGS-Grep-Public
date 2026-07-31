@@ -766,7 +766,7 @@ def test_token_with_embedded_space_blocks_next_and_warns(gui_state):
 
 # ── Input validation: Target rsID must match the "rs" + digits format ──────
 
-def _set_step3_widgets(gui_state, rsid="rs10305420", chromosome=6, position_text="39,048,860"):
+def _set_step3_widgets(gui_state, rsid="rs1260326", chromosome=2, position_text="27,508,073"):
     """Populate every widget key render_step3_rsid_guide() reads. Mirrors
     what real Streamlit would already have written into session_state from
     user interaction before the script rerun that calls this function."""
@@ -886,11 +886,11 @@ def test_sync_target_pos_from_text_rejects_zero_input(gui_state):
 def test_sync_target_pos_from_text_accepts_positive_input(gui_state):
     """A valid positive paste (with comma separators) is parsed and
     stored."""
-    gui_state["target_pos_text_widget"] = "39,048,860"
+    gui_state["target_pos_text_widget"] = "27,508,073"
 
     gui._sync_target_pos_from_text()
 
-    assert gui_state["target_pos"] == 39048860
+    assert gui_state["target_pos"] == 27508073
 
 
 # ── Input validation: Chromosome number_input is range-bound by Streamlit ──

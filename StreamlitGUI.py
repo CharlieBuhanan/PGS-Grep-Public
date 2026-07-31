@@ -62,7 +62,7 @@ def _sync_target_pos_from_text() -> None:
     """
     Callback for the Center Position text field. Strips thousands
     separators and whitespace (positions copied from NCBI's Genome Data
-    Viewer are formatted like "39,048,860", which a native numeric input
+    Viewer are formatted like "27,508,073", which a native numeric input
     silently rejects on paste) and, if what is left is a positive integer,
     writes it into the numeric 'target_pos' session-state key that the
     rest of the app relies on. Invalid input (non-digits, zero, or a
@@ -197,12 +197,12 @@ def init_session_state() -> None:
         "preview_metadata": None,
         "want_ld_proxies": "No, scan target position only",
         "ldlink_token": "",
-        "target_rsid": "rs10305420",
+        "target_rsid": "rs1260326",
         "genome_build": "GRCh38",
         "population": "Choose...",
-        "chromosome": 6,
-        "target_pos": 39_048_860,
-        "target_pos_text": "39,048,860",
+        "chromosome": 2,
+        "target_pos": 27_508_073,
+        "target_pos_text": "27,508,073",
         "window_size": 0,
         "ld_window_size": 5_000,
         "ld_metric": "R² only",
@@ -432,7 +432,7 @@ used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep
     st.subheader("Before you start, consider:")
     st.markdown(
         """
-- A **target SNP RSID** (ex: rs10305420) that you want to locate
+- A **target SNP RSID** (ex: rs1260326) that you want to locate
 - A Polygenic Score (PGS) file (or a publication on the PGS Catalog)
 - Whether or not you want to consider Linkage Disequilibrium in your results (this requires a free LDLink Token from the National Cancer Institute, see the [LDLink API](https://ldlink.nih.gov/apiaccess))
         """
@@ -598,7 +598,7 @@ def render_step3_rsid_guide() -> None:
     """
     st.header("Locate Your Target RSID")
     st.markdown(
-        "An **rsID** (e.g. `rs10305420`) is a unique reference ID assigned to a "
+        "An **rsID** (e.g. `rs1260326`) is a unique reference ID assigned to a "
         "specific SNP in NCBI's dbSNP database. This tool searches by "
         "**chromosomal position**, not by rsID directly, so you will need to look "
         "up your target SNP's coordinates first."
@@ -610,7 +610,7 @@ def render_step3_rsid_guide() -> None:
     st.markdown(
         f"""
 1. Open the [NCBI Genome Data Viewer](https://www.ncbi.nlm.nih.gov/gdv). This resource is managed by the National Library of Medicine and provides a visual interface to explore genomic data.
-2. Search for your rsID (e.g. `rs10305420`).
+2. Search for your rsID (e.g. `rs1260326`).
 3. **Set the reference assembly to match your uploaded PGS file: `{detected_build}`.**
    Coordinates differ between assemblies, so using the wrong one will point you
    to the wrong position.
@@ -628,20 +628,20 @@ def render_step3_rsid_guide() -> None:
         st.info(f"Detected genome build from your uploaded file: **{detected_build}**")
 
     st.subheader("Target Variant")
-    st.caption("Enter the rsID, chromosome, and position you looked up above. Default values are shown for rs10305420 as an example.")
+    st.caption("Enter the rsID, chromosome, and position you looked up above. Default values are shown for rs1260326 as an example.")
 
     st.text_input(
         "Target rsID (must match center position)",
         value=st.session_state["target_rsid"],
         key="target_rsid_widget",
-        help="The rsID (e.g. rs10305420) you looked up above. Must start with "
+        help="The rsID (e.g. rs1260326) you looked up above. Must start with "
              "\"rs\" followed by digits only. Used to label results and, if LD "
              "proxies are enabled, as the query variant for the LDlink lookup.",
     )
     st.session_state["target_rsid"] = st.session_state["target_rsid_widget"]
     rsid_valid = is_valid_rsid(st.session_state["target_rsid"])
     if not rsid_valid:
-        st.caption("⚠️ Enter a valid rsID: \"rs\" followed by digits only (e.g. rs10305420)")
+        st.caption("⚠️ Enter a valid rsID: \"rs\" followed by digits only (e.g. rs1260326)")
 
     st.number_input(
         "Chromosome #", min_value=1, max_value=25,
@@ -658,7 +658,7 @@ def render_step3_rsid_guide() -> None:
         on_change=_sync_target_pos_from_text,
         help="The base-pair position of your target variant, e.g. from NCBI's "
              "Genome Data Viewer. You can paste it with or without comma "
-             "separators (e.g. 39048860 or 39,048,860). Must be a positive "
+             "separators (e.g. 27508073 or 27,508,073). Must be a positive "
              "whole number. The scan searches for variants at this position, "
              "plus a window configured later.",
     )
