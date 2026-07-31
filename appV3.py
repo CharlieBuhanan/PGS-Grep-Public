@@ -166,11 +166,11 @@ def build_output_header(
     """
     # Build human-readable LD filter description
     if r2_threshold is not None and dprime_threshold is not None:
-        ld_filter_str = f"r^2 ≥ {r2_threshold} AND D' ≥ {dprime_threshold}"
+        ld_filter_str = f"r^2 >= {r2_threshold} AND D' >= {dprime_threshold}"
     elif r2_threshold is not None:
-        ld_filter_str = f"r^2 ≥ {r2_threshold}"
+        ld_filter_str = f"r^2 >= {r2_threshold}"
     elif dprime_threshold is not None:
-        ld_filter_str = f"D' ≥ {dprime_threshold}"
+        ld_filter_str = f"D' >= {dprime_threshold}"
     else:
         ld_filter_str = "None"
 
