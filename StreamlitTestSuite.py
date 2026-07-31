@@ -597,7 +597,7 @@ def test_non_harmonized_upload_shows_error_and_blocks_next(gui_state):
 
     assert gui_state["pgs_file_is_harmonized"] is False
     error_text = " ".join(str(c.args[0]) for c in gui.st.error.call_args_list)
-    assert "doesn't look like a harmonized" in error_text
+    assert "does not look like a harmonized" in error_text
     assert _button_call("Next").kwargs["disabled"] is True
 
 
@@ -748,6 +748,195 @@ def test_token_page_next_enabled_once_token_entered(gui_state):
 
     assert _button_call("Next").kwargs["disabled"] is False
     assert gui.st.warning.call_args_list == []
+
+
+def test_token_with_embedded_space_blocks_next_and_warns(gui_state):
+    """A pasted token containing whitespace can never be a real LDlink
+    token, so it must not be accepted as valid."""
+    gui_state["wizard_step"] = "ld_auth"
+    gui_state["ldlink_token"] = "abc def"
+    gui_state["ldlink_token_widget"] = "abc def"
+
+    gui.render_step4_5_ld_auth()
+
+    assert _button_call("Next").kwargs["disabled"] is True
+    warning_text = " ".join(str(c.args[0]) for c in gui.st.warning.call_args_list)
+    assert "cannot contain spaces" in warning_text
+
+
+# ── Input validation: Target rsID must match the "rs" + digits format ──────
+
+def _set_step3_widgets(gui_state, rsid="rs10305420", chromosome=6, position_text="39,048,860"):
+    """Populate every widget key render_step3_rsid_guide() reads. Mirrors
+    what real Streamlit would already have written into session_state from
+    user interaction before the script rerun that calls this function."""
+    gui_state["target_rsid_widget"] = rsid
+    gui_state["chromosome_widget"] = chromosome
+    gui_state["target_pos_text_widget"] = position_text
+
+
+def test_garbage_rsid_blocks_next_and_shows_warning(gui_state):
+    """A non-rsID string like 'asdfasdfafipn' must never be allowed through
+    to the next step."""
+    _set_step3_widgets(gui_state, rsid="asdfasdfafipn")
+
+    gui.render_step3_rsid_guide()
+
+    assert gui_state["target_rsid"] == "asdfasdfafipn"
+    assert _button_call("Next").kwargs["disabled"] is True
+    caption_text = " ".join(str(c.args[0]) for c in gui.st.caption.call_args_list)
+    assert "valid rsID" in caption_text
+
+
+def test_rsid_missing_digits_is_rejected(gui_state):
+    """'rs' alone, with no digits, is not a valid rsID."""
+    _set_step3_widgets(gui_state, rsid="rs")
+
+    gui.render_step3_rsid_guide()
+
+    assert _button_call("Next").kwargs["disabled"] is True
+
+
+def test_rsid_prefix_is_case_insensitive(gui_state):
+    """A stray capital 'RS' prefix should still be accepted, even though
+    real dbSNP rsIDs are always lowercase."""
+    _set_step3_widgets(gui_state, rsid="RS7903146")
+
+    gui.render_step3_rsid_guide()
+
+    assert _button_call("Next").kwargs["disabled"] is False
+
+
+def test_valid_rsid_and_position_enable_next(gui_state):
+    """A properly formatted rsID with a valid numeric position must enable
+    Next, as a contrasting control case for the rejection tests above."""
+    _set_step3_widgets(gui_state, rsid="rs7903146", position_text="112998590")
+
+    gui.render_step3_rsid_guide()
+
+    assert _button_call("Next").kwargs["disabled"] is False
+
+
+# ── Input validation: Center Position must be a positive whole number ──────
+
+def test_non_numeric_position_blocks_next(gui_state):
+    """Typing letters into the Center Position field must block Next, even
+    with a valid rsID."""
+    _set_step3_widgets(gui_state, position_text="asdfasdfafipn")
+
+    gui.render_step3_rsid_guide()
+
+    assert _button_call("Next").kwargs["disabled"] is True
+    caption_text = " ".join(str(c.args[0]) for c in gui.st.caption.call_args_list)
+    assert "positive whole number" in caption_text
+
+
+def test_negative_position_blocks_next(gui_state):
+    """A leading minus sign must not be accepted; a genomic coordinate can
+    never be negative."""
+    _set_step3_widgets(gui_state, position_text="-112998590")
+
+    gui.render_step3_rsid_guide()
+
+    assert _button_call("Next").kwargs["disabled"] is True
+
+
+def test_zero_position_blocks_next(gui_state):
+    """Position zero is not a valid genomic coordinate."""
+    _set_step3_widgets(gui_state, position_text="0")
+
+    gui.render_step3_rsid_guide()
+
+    assert _button_call("Next").kwargs["disabled"] is True
+
+
+def test_position_with_comma_separators_is_accepted(gui_state):
+    """Thousands separators copied from NCBI's Genome Data Viewer must
+    still validate as a positive integer."""
+    _set_step3_widgets(gui_state, position_text="112,998,590")
+
+    gui.render_step3_rsid_guide()
+
+    assert _button_call("Next").kwargs["disabled"] is False
+
+
+def test_sync_target_pos_from_text_rejects_negative_input(gui_state):
+    """The Center Position on_change callback must not write a negative
+    number into the durable 'target_pos' session-state key."""
+    gui_state["target_pos"] = 555555
+    gui_state["target_pos_text_widget"] = "-999"
+
+    gui._sync_target_pos_from_text()
+
+    assert gui_state["target_pos"] == 555555  # left unchanged, not corrupted
+    assert gui_state["target_pos_text"] == "-999"  # raw text still mirrored
+
+
+def test_sync_target_pos_from_text_rejects_zero_input(gui_state):
+    """Zero is not a valid genomic coordinate and must not overwrite
+    'target_pos'."""
+    gui_state["target_pos"] = 555555
+    gui_state["target_pos_text_widget"] = "0"
+
+    gui._sync_target_pos_from_text()
+
+    assert gui_state["target_pos"] == 555555
+
+
+def test_sync_target_pos_from_text_accepts_positive_input(gui_state):
+    """A valid positive paste (with comma separators) is parsed and
+    stored."""
+    gui_state["target_pos_text_widget"] = "39,048,860"
+
+    gui._sync_target_pos_from_text()
+
+    assert gui_state["target_pos"] == 39048860
+
+
+# ── Input validation: Chromosome number_input is range-bound by Streamlit ──
+
+def test_chromosome_widget_declares_standard_range_and_tooltip(gui_state):
+    """Chromosome must be constrained to 1-25 (1-22, 23=X, 24=Y, 25=MT) at
+    the widget level, with a tooltip explaining the coding."""
+    _set_step3_widgets(gui_state)
+
+    gui.render_step3_rsid_guide()
+
+    number_input_call = next(
+        c for c in gui.st.number_input.call_args_list
+        if c.args and c.args[0] == "Chromosome #"
+    )
+    assert number_input_call.kwargs["min_value"] == 1
+    assert number_input_call.kwargs["max_value"] == 25
+    assert "23=X" in number_input_call.kwargs["help"]
+    assert "24=Y" in number_input_call.kwargs["help"]
+    assert "25=MT" in number_input_call.kwargs["help"]
+
+
+# ── Input validation: Genomic Search Window flanking size floor ────────────
+
+def _set_step5_widgets(gui_state):
+    """Populate every widget key render_step5_config() unconditionally
+    reads (LD-proxy-specific widgets are only needed when want_ld_proxies
+    is 'Yes...', which these tests do not exercise)."""
+    gui_state["genome_build_widget"] = gui_state["genome_build"]
+    gui_state["window_size_widget"] = gui_state["window_size"]
+    gui_state["proxies_only_widget"] = gui_state["proxies_only"]
+
+
+def test_window_size_input_has_a_zero_floor(gui_state):
+    """The Flanking Size number_input must not allow negative windows,
+    which would produce a nonsensical (inverted) search range."""
+    gui_state["want_ld_proxies"] = "No, scan target position only"
+    _set_step5_widgets(gui_state)
+
+    gui.render_step5_config()
+
+    number_input_call = next(
+        c for c in gui.st.number_input.call_args_list
+        if c.args and c.args[0] == "Flanking Size (+/- base pairs)"
+    )
+    assert number_input_call.kwargs["min_value"] == 0
 
 
 # ═════════════════════════════════════════════════════════════════════════

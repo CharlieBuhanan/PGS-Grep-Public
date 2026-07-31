@@ -31,7 +31,6 @@ First, find and download the PGS file you want to scan from the PGS Catalog http
 Run this command to create the UI window:
 
 ```
-if ((Split-Path $PWD -Leaf) -ne "src") { cd src }
 python -m streamlit run StreamlitGUI.py
 ```
 

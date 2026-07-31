@@ -13,7 +13,7 @@ Architecture notes for developers:
   immediately after the widget is drawn, into a separate durable key
   (e.g. "target_rsid", "chromosome", "target_pos") that is a plain
   session_state entry and persists regardless of which step is currently
-  rendering. It's the durable key that the rest of the app (scan summary,
+  rendering. It is the durable key that the rest of the app (scan summary,
   run_scan, CSV export, and the read-only restatement in Step 5) reads.
 - Custom typography/CSS below relies on Roboto being served locally from
   ./static/ (requires enableStaticServing=true in .streamlit/config.toml).
@@ -22,12 +22,20 @@ Architecture notes for developers:
 import hashlib
 import io
 import os
+import re
 from datetime import date
 
 import streamlit as st  # type: ignore
 
 import appV3
 import constants
+
+RSID_PATTERN = re.compile(r"^rs\d+$", re.IGNORECASE)
+
+
+def is_valid_rsid(value: str) -> bool:
+    """True if value matches the standard NCBI dbSNP rsID format ('rs' + digits)."""
+    return bool(RSID_PATTERN.match(value.strip()))
 
 
 def compute_md5(file_bytes: bytes) -> str:
@@ -40,11 +48,12 @@ def _sync_target_pos_from_text() -> None:
     Callback for the Center Position text field. Strips thousands
     separators and whitespace (positions copied from NCBI's Genome Data
     Viewer are formatted like "39,048,860", which a native numeric input
-    silently rejects on paste) and, if what's left is a valid integer,
+    silently rejects on paste) and, if what is left is a positive integer,
     writes it into the numeric 'target_pos' session-state key that the
-    rest of the app relies on. Invalid input is left in the text box
-    as-is and simply doesn't update 'target_pos', so a bad paste can't
-    silently corrupt the search window.
+    rest of the app relies on. Invalid input (non-digits, zero, or a
+    negative value) is left in the text box as-is and simply does not
+    update 'target_pos', so a bad paste cannot silently corrupt the
+    search window.
 
     Reads from the widget's own key ('target_pos_text_widget') rather
     than the durable 'target_pos_text' key, and immediately mirrors the
@@ -54,7 +63,7 @@ def _sync_target_pos_from_text() -> None:
     raw = st.session_state.get("target_pos_text_widget", "")
     st.session_state["target_pos_text"] = raw
     cleaned = raw.replace(",", "").replace(" ", "").strip()
-    if cleaned.lstrip("-").isdigit():
+    if cleaned.isdigit() and int(cleaned) > 0:
         st.session_state["target_pos"] = int(cleaned)
 
 
@@ -74,7 +83,7 @@ def render_metadata_card(metadata: dict) -> None:
     Prefers the harmonized build ('hmpos_build'), which reflects the
     actual coordinates in this file (hm_chr/hm_pos). The legacy
     'genome_build' field records the original study's assembly instead,
-    which is often GRCh37 even in a file harmonized to GRCh38, so it's
+    which is often GRCh37 even in a file harmonized to GRCh38, so it is
     only used as a fallback when hmpos_build is absent (e.g. older V1
     files).
     """
@@ -133,7 +142,7 @@ def reset_downstream_state() -> None:
     Clear everything downstream of the source file: any cached scan
     results, match metrics, and the previous metadata preview. Called
     whenever a newly-uploaded file is detected, so stale results from a
-    prior file can never be displayed alongside — or exported with — a
+    prior file can never be displayed alongside, or exported with, a
     new one.
     """
     st.session_state["scan_results"] = None
@@ -419,22 +428,24 @@ def render_step1_welcome() -> None:
     )
 
     with st.expander("ℹ️ Information on Key Terms", expanded=False):
-        st.markdown("""**Polygenic Score (PGS)**: a numeric score that estimates an individual's genetic predisposition to a trait or disease, based on the combined effect of many genetic variants.
+        st.markdown("""**Polygenic Score (PGS)**: A numeric score that estimates an individual's genetic predisposition to a trait or disease, based on the combined effect of many genetic variants.
 PGS files are published in the PGS Catalog (https://www.pgscatalog.org/) and detail the genetic variants and how much each contributes to a target disease.
 
-**SNP (Single Nucleotide Polymorphism)**: a single base pair location in the DNA
-sequence where individuals commonly differ. This app searches for SNPs by their position in the human genome. 
+**SNP (Single Nucleotide Polymorphism)**: A single base pair location in the DNA
+sequence where individuals commonly differ. This app searches for SNPs by their position in the human genome.
 
-**LD (Linkage Disequilibrium)**: a measure of how often two nearby genetic
+**RSID (Reference SNP ID)**: A stable identifier, prefixed with "rs", that the NCBI dbSNP database assigns to a specific SNP. Because an RSID maps to a fixed chromosomal position, it lets this app look up the coordinates needed to search a PGS file.
+
+**LD (Linkage Disequilibrium)**: A measure of how often two nearby genetic
 variants are inherited together. Variants close together on a chromosome tend to have a higher LD.
 
 **LD Proxies**: SNPs that are in strong linkage disequilibrium with a target SNP, meaning
-they're usually inherited alongside it. They are useful because if an SNP is missing from a PGS file, a proxy that
+they are usually inherited alongside it. They are useful because if an SNP is missing from a PGS file, a proxy that
 tracks closely with it can act as a stand-in and capture a similar
 genetic signal.
 
-**LDLink API Access Token**: this optional token can be obtained for free at [LDLink API](https://ldlink.nih.gov/apiaccess), hosted and developed by the National Cancer Institute (NCI), 
-part of the U.S. National Institutes of Health (NIH). This token authenticates a request for LD proxy data from the LDLink database. Your token is never stored or shared. If you choose to provide one, it will only be used for LDLink's API calls. You can see how your token is
+**LDLink API Access Token**: This optional token can be obtained for free at [LDLink API](https://ldlink.nih.gov/apiaccess), hosted and developed by the National Cancer Institute (NCI),
+part of the U.S. National Institutes of Health (NIH). This token authenticates a request for LD proxy data from the LDLink database, which allows this site to find variants correlated with your specified SNP. Your token is never stored or shared. If you choose to provide one, it will only be used for LDLink's API calls. You can see how your token is
 used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep-Public.""")
 
     st.subheader("Before you start, consider:")
@@ -494,7 +505,7 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
    or `_hmPOS_GRCh37.txt.gz`, depending on the genome build.""", help = "The genome build GRCh38 (hg38) and GRCh37 (hg19) specifies the reference human genome assembly used to define the chromosomal coordinates of the SNPs in the file. Be sure to download the harmonized version of the score  file for your desired genome build.")
 
         st.markdown("5. Download the optional corresponding MD5 file if you want to verify the download's integrity.", help = "Optional. The .md5 / .txt checksum file from the PGS Catalog is "
-                 "used to confirm your download wasn't corrupted or truncated.")
+                 "used to confirm your download was not corrupted or truncated.")
         st.markdown("6. No need to unzip. Upload the `.txt.gz` file directly below and the MD5 file if you have it. 200 megabytes is the maximum size for file uploads.", help="PGS Grep can read the .gz zipped file type directly. No zipped files on the PGS Catalogue exceed 200 MB as of June 2026.")
 
     col_upload, col_md5 = st.columns([1,1])
@@ -504,7 +515,7 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
             "Upload file", type=["gz"], label_visibility="collapsed"
         )
     with col_md5:
-        st.markdown("**MD5 Checksum** *(optional)*", help = "Optional. The .md5 / .txt checksum file from the PGS Catalog is used to confirm your download wasn't corrupted or truncated.")
+        st.markdown("**MD5 Checksum** *(optional)*", help = "Optional. The .md5 / .txt checksum file from the PGS Catalog is used to confirm your download was not corrupted or truncated.")
         uploaded_md5 = st.file_uploader(
             "Upload MD5", type=["md5"], key="md5_uploader",
             label_visibility="collapsed",
@@ -566,8 +577,8 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
             render_metadata_card(st.session_state["preview_metadata"])
         if st.session_state.get("pgs_file_is_harmonized") is False:
             st.error(
-                "**This doesn't look like a harmonized PGS file.** No harmonized-build "
-                "metadata (`hm_pos`) was found, and the filename doesn't include `_hmPOS_`. "
+                "**This does not look like a harmonized PGS file.** No harmonized-build "
+                "metadata (`hm_pos`) was found, and the filename does not include `_hmPOS_`. "
                 "Please re-download the **harmonized** version of this score from the PGS Catalog's "
                 "'Harmonized' folder (see the instructions above) before continuing."
             )
@@ -608,7 +619,7 @@ def render_step3_rsid_guide() -> None:
     st.markdown(
         "An **rsID** (e.g. `rs10305420`) is a unique reference ID assigned to a "
         "specific SNP in NCBI's dbSNP database. This tool searches by "
-        "**chromosomal position**, not by rsID directly, so you'll need to look "
+        "**chromosomal position**, not by rsID directly, so you will need to look "
         "up your target SNP's coordinates first."
     )
 
@@ -623,7 +634,7 @@ def render_step3_rsid_guide() -> None:
    Coordinates differ between assemblies, so using the wrong one will point you
    to the wrong position.
 4. Note down the **chromosome number** and **base-pair position** shown for
-   that assembly, or keep the tab open. You'll need this to fill in the fields below.
+   that assembly, or keep the tab open. You will need this to fill in the fields below.
         """
     )
 
@@ -642,11 +653,14 @@ def render_step3_rsid_guide() -> None:
         "Target rsID (must match center position)",
         value=st.session_state["target_rsid"],
         key="target_rsid_widget",
-        help="The rsID (e.g. rs10305420) you looked up above. Used to label "
-             "results and, if LD proxies are enabled, as the query variant "
-             "for the LDlink lookup.",
+        help="The rsID (e.g. rs10305420) you looked up above. Must start with "
+             "\"rs\" followed by digits only. Used to label results and, if LD "
+             "proxies are enabled, as the query variant for the LDlink lookup.",
     )
     st.session_state["target_rsid"] = st.session_state["target_rsid_widget"]
+    rsid_valid = is_valid_rsid(st.session_state["target_rsid"])
+    if not rsid_valid:
+        st.caption("⚠️ Enter a valid rsID: \"rs\" followed by digits only (e.g. rs10305420)")
 
     st.number_input(
         "Chromosome #", min_value=1, max_value=25,
@@ -663,13 +677,15 @@ def render_step3_rsid_guide() -> None:
         on_change=_sync_target_pos_from_text,
         help="The base-pair position of your target variant, e.g. from NCBI's "
              "Genome Data Viewer. You can paste it with or without comma "
-             "separators (e.g. 39048860 or 39,048,860). The scan searches "
-             "for variants at this position, plus a window configured later.",
+             "separators (e.g. 39048860 or 39,048,860). Must be a positive "
+             "whole number. The scan searches for variants at this position, "
+             "plus a window configured later.",
     )
     st.session_state["target_pos_text"] = st.session_state["target_pos_text_widget"]
-    position_valid = st.session_state["target_pos_text"].replace(",", "").replace(" ", "").strip().lstrip("-").isdigit()
+    cleaned_target_pos = st.session_state["target_pos_text"].replace(",", "").replace(" ", "").strip()
+    position_valid = cleaned_target_pos.isdigit() and int(cleaned_target_pos) > 0
     if not position_valid:
-        st.caption("⚠️ Enter digits only (commas are fine)")
+        st.caption("⚠️ Enter a positive whole number, digits only (commas are fine)")
 
     st.write("")
     col_back, col_next = st.columns(2)
@@ -678,7 +694,7 @@ def render_step3_rsid_guide() -> None:
             go_to_prev_step()
             st.rerun()
     with col_next:
-        can_advance = bool(st.session_state["target_rsid"].strip()) and position_valid
+        can_advance = rsid_valid and position_valid
         if st.button("Next", type="primary", width='stretch', disabled=not can_advance):
             go_to_next_step()
             st.rerun()
@@ -693,8 +709,8 @@ def render_step4_ld_choice() -> None:
     st.markdown(
         """
 **LD proxies** are nearby SNPs that tend to be inherited together with your
-target SNP (they're in *linkage disequilibrium*). If your exact target SNP
-isn't in the PGS file, a proxy can act as a stand-in that captures a
+target SNP (they are in *linkage disequilibrium*). If your exact target SNP
+is not in the PGS file, a proxy can act as a stand-in that captures a
 similar genetic signal.
         """
     )
@@ -735,7 +751,7 @@ def render_step4_5_ld_auth() -> None:
         "token to authenticate requests. This "
         "app only uses it to make LD queries on your behalf during this session."
     )
-    st.caption("LDLink API Access Token: this optional token can be obtained for free at [LDLink API](https://ldlink.nih.gov/apiaccess), hosted and developed by the National Cancer Institute (NCI), "
+    st.caption("LDLink API Access Token: This optional token can be obtained for free at [LDLink API](https://ldlink.nih.gov/apiaccess), hosted and developed by the National Cancer Institute (NCI), "
         "part of the U.S. National Institutes of Health (NIH). This token authenticates a request for LD proxy data from the LDLink database. "
         "Your token is never stored or shared. If you choose to provide one, it will only be used for LDLink's API calls. You can see how your token is "
         "used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep-Public.")
@@ -751,9 +767,14 @@ def render_step4_5_ld_auth() -> None:
              "Identical queries are cached locally for future runs.",
     )
     st.session_state["ldlink_token"] = st.session_state["ldlink_token_widget"]
+    token_value = st.session_state["ldlink_token"].strip()
+    token_has_whitespace = bool(re.search(r"\s", token_value))
+    token_valid = bool(token_value) and not token_has_whitespace
 
-    if not st.session_state["ldlink_token"].strip():
+    if not token_value:
         st.warning("A token is required to fetch LD proxies. You can leave this blank and go Back to skip LD proxies instead.")
+    elif token_has_whitespace:
+        st.warning("A token cannot contain spaces. Double-check that you copied it correctly.")
 
     st.write("")
     col_back, col_next = st.columns(2)
@@ -762,7 +783,7 @@ def render_step4_5_ld_auth() -> None:
             go_to_prev_step()
             st.rerun()
     with col_next:
-        can_advance = bool(st.session_state["ldlink_token"].strip())
+        can_advance = token_valid
         if st.button("Next", type="primary", width='stretch', disabled=not can_advance):
             go_to_next_step()
             st.rerun()
@@ -815,7 +836,7 @@ def render_step5_config() -> None:
         index=build_options.index(st.session_state["genome_build"]),
         key="genome_build_widget",
         help="The reference genome assembly your coordinates are in. "
-             "Auto-filled from your uploaded PGS file when available — "
+             "Auto-filled from your uploaded PGS file when available; "
              "change it only if you looked up coordinates in a different build.",
     )
     st.session_state["genome_build"] = st.session_state["genome_build_widget"]
@@ -823,10 +844,11 @@ def render_step5_config() -> None:
     st.subheader("Genomic Search Window")
     st.number_input(
         "Flanking Size (+/- base pairs)",
+        min_value=0,
         step=1_000,
         value=st.session_state["window_size"],
         key="window_size_widget",
-        help="Creates a window this many base pairs on either side of the center position.",
+        help="Creates a window this many base pairs on either side of the center position. Must be zero or a positive whole number.",
     )
     st.session_state["window_size"] = st.session_state["window_size_widget"]
     start_window = st.session_state["target_pos"] - st.session_state["window_size"]
@@ -846,7 +868,7 @@ def render_step5_config() -> None:
             index=population_options.index(st.session_state["population"]),
             key="population_widget",
             help="The 1000 Genomes super-population used to calculate LD. This "
-                 "matters because LD patterns differ by ancestry — proxies "
+                 "matters because LD patterns differ by ancestry; proxies "
                  "strongly linked in one population may not be linked in "
                  "another. EUR = European, AMR = Admixed American, "
                  "AFR = African, EAS = East Asian, SAS = South Asian. "
@@ -935,9 +957,9 @@ def render_cache_status() -> None:
         f"LD{s['target_rsid']}_{s['population']}_{s['genome_build'].replace(' ', '_')}.txt",
     )
     if os.path.exists(cache_path):
-        st.caption(f"LD cache found for **{s['target_rsid']}** — repeated LDlink API calls can be skipped.")
+        st.caption(f"LD cache found for **{s['target_rsid']}**: Repeated LDlink API calls can be skipped.")
     else:
-        st.caption("No LD cache found yet: will query the LDlink API on scan.")
+        st.caption("No LD cache found yet: Will query the LDlink API on scan.")
 
 
 def run_scan() -> None:
@@ -1053,7 +1075,7 @@ def render_results() -> None:
             <div style="background:#cce5ff;border:2px solid #004085;border-radius:8px;
                         padding:16px 20px;margin-bottom:12px;font-size:1.1rem;
                         font-weight:700;color:#004085;text-align:center;">
-              PROXY MATCH: target absent at Chr{s['chromosome']}:{s['target_pos']:,}, but
+              PROXY MATCH: Target absent at Chr{s['chromosome']}:{s['target_pos']:,}, but
               {len(proxy_matches)} LD-linked proxy variant(s) found in the window.
             </div>
             """,
@@ -1061,7 +1083,7 @@ def render_results() -> None:
         )
     else:
         st.error(
-            f"No match: neither the target position (Chr{s['chromosome']}:{s['target_pos']:,}) "
+            f"No match: Neither the target position (Chr{s['chromosome']}:{s['target_pos']:,}) "
             "nor any qualifying proxies were found in this window."
         )
 
@@ -1090,7 +1112,7 @@ def render_results() -> None:
             )
 
     def highlight_status(val):
-        """Row-color a Match_Status cell based on whether it's an exact, proxy, or unlinked call."""
+        """Row-color a Match_Status cell based on whether it is an exact, proxy, or unlinked call."""
         if "EXACT" in val:
             return "background-color: #d4edda; color: #155724;"
         if "PROXY" in val:
