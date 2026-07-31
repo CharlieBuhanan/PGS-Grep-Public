@@ -12,6 +12,13 @@ textColor = "#262730"
 # Use the locally-hosted "Roboto" family defined by the [[theme.fontFaces]]
 # entries below (native custom-font support in modern Streamlit) instead of
 # a generic keyword like "sans serif".
+#
+# Known trade-off: Streamlit resends this theme config, fontFaces included,
+# on every script rerun (not just page load), and the frontend re-registers
+# the @font-face rules each time, causing a brief flash back to the default
+# font on interaction. This is a Streamlit frontend behavior, not something
+# fixable from this config file; see the note in StreamlitGUI.py's module
+# docstring. Accepted as-is so Roboto stays the source of truth here.
 font = "Roboto"
 
 # Each entry maps one weight/style of Roboto to its file in ./static/.

@@ -15,8 +15,23 @@ Architecture notes for developers:
   session_state entry and persists regardless of which step is currently
   rendering. It is the durable key that the rest of the app (scan summary,
   run_scan, CSV export, and the read-only restatement in Step 5) reads.
-- Custom typography/CSS below relies on Roboto being served locally from
-  ./static/ (requires enableStaticServing=true in .streamlit/config.toml).
+- The Roboto typeface is applied entirely through Streamlit's native theming
+  ([theme] font = "Roboto" plus [[theme.fontFaces]] in .streamlit/config.toml,
+  which serves the files in ./static/ via enableStaticServing=true). Do not
+  redeclare @font-face or force font-family via injected CSS below; a
+  duplicate declaration previously fought the native theme for control on
+  every rerun and made a pre-existing flicker worse.
+  Known issue: a brief flash back to the browser's default font on every
+  widget interaction is a Streamlit 1.58 frontend behavior, not a bug in
+  this file. Streamlit resends the full theme (including fontFaces) as
+  part of a new "new_session" message on every script rerun, not just on
+  initial page load (confirmed in streamlit/runtime/app_session.py,
+  _create_new_session_message, triggered by ScriptRunnerEvent.SCRIPT_STARTED),
+  and the frontend re-registers the custom @font-face rules from a freshly
+  parsed (but content-identical) array each time, forcing a brief style
+  recompute. This is outside this app's control short of patching
+  Streamlit's bundled frontend, which is unsupported; it has been accepted
+  as a known trade-off of using a self-hosted custom theme font.
 """
 
 import hashlib
@@ -260,45 +275,10 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    @font-face {
-        font-family: 'Roboto';
-        src: url('app/static/Roboto-Regular.ttf') format('truetype');
-        font-weight: 400;
-        font-style: normal;
-        font-display: swap;
-    }
-    @font-face {
-        font-family: 'Roboto';
-        src: url('app/static/Roboto-Medium.ttf') format('truetype');
-        font-weight: 500;
-        font-style: normal;
-        font-display: swap;
-    }
-    @font-face {
-        font-family: 'Roboto';
-        src: url('app/static/Roboto-Bold.ttf') format('truetype');
-        font-weight: 700;
-        font-style: normal;
-        font-display: swap;
-    }
-    @font-face {
-        font-family: 'Roboto';
-        src: url('app/static/Roboto-Italic.ttf') format('truetype');
-        font-weight: 400;
-        font-style: italic;
-        font-display: swap;
-    }
-
-    html, body, [class*="css"], .stApp, .stMarkdown, .stApp p,
-    .stApp span:not([data-testid="stIconMaterial"]),
-    .stApp label, .stApp div {
-        font-family: 'Roboto', 'Helvetica Neue', Arial, sans-serif !important;
-    }
     code, pre, .stCode, [data-testid="stCodeBlock"] {
         font-family: 'Roboto Mono', 'Courier New', monospace !important;
     }
     h1, h2, h3, h4 {
-        font-family: 'Roboto', 'Helvetica Neue', Arial, sans-serif !important;
         font-weight: 700 !important;
         letter-spacing: -0.01em;
         color: #1a2b4c;
