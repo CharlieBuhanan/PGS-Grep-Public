@@ -872,8 +872,7 @@ def render_step5_config() -> None:
                  "matters because LD patterns differ by ancestry; proxies "
                  "strongly linked in one population may not be linked in "
                  "another. EUR = European, AMR = Admixed American, "
-                 "AFR = African, EAS = East Asian, SAS = South Asian. "
-                 "Choose the population that best matches your study cohort.",
+                 "AFR = African, EAS = East Asian, SAS = South Asian. ",
         )
         st.session_state["population"] = st.session_state["population_widget"]
         population_selected = st.session_state["population"] != "Choose..."
@@ -915,21 +914,22 @@ def render_step5_config() -> None:
             f"Search window: **Chr{st.session_state['chromosome']}:"
             f"{start_window:,} - {end_window:,}**"
         )
+
+        st.checkbox(
+            "Hide unlinked variants",
+            value=st.session_state["proxies_only"],
+            key="proxies_only_widget",
+            help="Hide variants in the window that are neither the exact target nor a qualifying LD proxy. "
+                 "Applies to both the on-screen table and the exported CSV.",
+        )
+        st.session_state["proxies_only"] = st.session_state["proxies_only_widget"]
     else:
         st.session_state["window_size"] = 0
+        st.session_state["proxies_only"] = True
         st.caption(
             "LD Proxies are turned off, so PGS Grep searches for the exact "
             "variant only."
         )
-
-    st.checkbox(
-        "Hide unlinked variants",
-        value=st.session_state["proxies_only"],
-        key="proxies_only_widget",
-        help="Hide variants in the window that are neither the exact target nor a qualifying LD proxy. "
-             "Applies to both the on-screen table and the exported CSV.",
-    )
-    st.session_state["proxies_only"] = st.session_state["proxies_only_widget"]
 
     st.write("")
     col_back, col_next = st.columns(2)

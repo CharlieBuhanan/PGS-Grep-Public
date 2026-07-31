@@ -924,12 +924,22 @@ def _flanking_size_call():
     )
 
 
+def _hide_unlinked_checkbox_call():
+    """Find the recorded 'Hide unlinked variants' checkbox call, if any."""
+    return next(
+        (c for c in gui.st.checkbox.call_args_list
+         if c.args and c.args[0] == "Hide unlinked variants"),
+        None,
+    )
+
+
 def _set_step5_widgets_ld_off(gui_state):
     """Populate every widget key render_step5_config() reads when LD
-    proxies are declined (the Flanking Size input does not exist in this
-    branch, since a window is meaningless without LD proxies)."""
+    proxies are declined. Neither the Flanking Size input nor the 'Hide
+    unlinked variants' checkbox exist in this branch, since a window (and
+    unlinked-vs-linked filtering within it) is meaningless without LD
+    proxies."""
     gui_state["genome_build_widget"] = gui_state["genome_build"]
-    gui_state["proxies_only_widget"] = gui_state["proxies_only"]
 
 
 def _set_step5_widgets_ld_on(gui_state, ld_window_size=5_000, population="EUR"):
@@ -956,6 +966,37 @@ def test_flanking_size_hidden_and_window_forced_to_zero_when_ld_proxies_off(gui_
 
     assert _flanking_size_call() is None
     assert gui_state["window_size"] == 0
+
+
+def test_hide_unlinked_checkbox_hidden_and_forced_true_when_ld_proxies_off(gui_state):
+    """With LD proxies declined, there is no such thing as an 'unlinked'
+    variant to show or hide, so the checkbox must not appear, and the
+    effective filtering behavior must default to the safe/simple case."""
+    gui_state["want_ld_proxies"] = "No, scan target position only"
+    gui_state["proxies_only"] = False  # a prior choice, if any
+    _set_step5_widgets_ld_off(gui_state)
+
+    gui.render_step5_config()
+
+    assert _hide_unlinked_checkbox_call() is None
+    assert gui_state["proxies_only"] is True
+
+
+def test_hide_unlinked_checkbox_shown_when_ld_proxies_on(gui_state):
+    """With LD proxies enabled, there can be linked vs. unlinked variants
+    in the window, so the checkbox must be shown and reflect the user's
+    stored preference."""
+    gui_state["want_ld_proxies"] = "Yes, also search LD proxies (requires a free token)"
+    gui_state["proxies_only"] = False
+    _set_step5_widgets_ld_on(gui_state)
+    gui_state["proxies_only_widget"] = False
+
+    gui.render_step5_config()
+
+    call = _hide_unlinked_checkbox_call()
+    assert call is not None
+    assert call.kwargs["value"] is False
+    assert gui_state["proxies_only"] is False
 
 
 def test_flanking_size_shown_with_positive_floor_when_ld_proxies_on(gui_state):
