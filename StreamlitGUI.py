@@ -188,7 +188,8 @@ def init_session_state() -> None:
         "chromosome": 6,
         "target_pos": 39_048_860,
         "target_pos_text": "39,048,860",
-        "window_size": 5_000,
+        "window_size": 0,
+        "ld_window_size": 5_000,
         "ld_metric": "R² only",
         "r2_filter": 0.7,
         "dprime_filter": 0.8,
@@ -792,9 +793,11 @@ def render_step4_5_ld_auth() -> None:
 def render_step5_config() -> None:
     """
     Restate the target rsID, chromosome, position, and detected genome
-    build collected in Step 3 as read-only fields, then collect the
-    genomic search window, LD thresholds (if applicable), and output
-    filtering preferences. The genome build used for the scan is
+    build collected in Step 3 as read-only fields, then collect LD proxy
+    settings and output filtering preferences. The flanking genomic search
+    window is only user-configurable when LD proxies are enabled (Step 4);
+    otherwise the scan searches for the single exact target position, and
+    'window_size' is forced to 0. The genome build used for the scan is
     pre-filled from Step 2's metadata extraction when available.
     """
     st.header("Search Configuration")
@@ -841,26 +844,24 @@ def render_step5_config() -> None:
     )
     st.session_state["genome_build"] = st.session_state["genome_build_widget"]
 
-    st.subheader("Genomic Search Window")
-    st.number_input(
-        "Flanking Size (+/- base pairs)",
-        min_value=0,
-        step=1_000,
-        value=st.session_state["window_size"],
-        key="window_size_widget",
-        help="Creates a window this many base pairs on either side of the center position. Must be zero or a positive whole number.",
-    )
-    st.session_state["window_size"] = st.session_state["window_size_widget"]
-    start_window = st.session_state["target_pos"] - st.session_state["window_size"]
-    end_window = st.session_state["target_pos"] + st.session_state["window_size"]
-    st.caption(
-        f"Search window: **Chr{st.session_state['chromosome']}:"
-        f"{start_window:,} - {end_window:,}**"
-    )
-
     population_selected = True
     if wants_ld_proxies():
         st.subheader("LD Proxy Settings")
+        st.number_input(
+            "Flanking Size (+/- base pairs)",
+            min_value=1,
+            step=1_000,
+            value=st.session_state["ld_window_size"],
+            key="ld_window_size_widget",
+            help="LD Proxies are enabled, so the scan checks every variant within "
+                 "this many base pairs of your target position and reports any "
+                 "that are in linkage disequilibrium (LD) with your target SNP, "
+                 "in addition to the exact target itself. Must be a positive "
+                 "whole number.",
+        )
+        st.session_state["ld_window_size"] = st.session_state["ld_window_size_widget"]
+        st.session_state["window_size"] = st.session_state["ld_window_size"]
+
         population_options = ["Choose...", "EUR", "AMR", "AFR", "EAS", "SAS"]
         st.selectbox(
             "LD Population (1000 Genomes)",
@@ -908,6 +909,19 @@ def render_step5_config() -> None:
             )
             st.session_state["dprime_filter"] = st.session_state["dprime_filter_widget"]
 
+        start_window = st.session_state["target_pos"] - st.session_state["window_size"]
+        end_window = st.session_state["target_pos"] + st.session_state["window_size"]
+        st.caption(
+            f"Search window: **Chr{st.session_state['chromosome']}:"
+            f"{start_window:,} - {end_window:,}**"
+        )
+    else:
+        st.session_state["window_size"] = 0
+        st.caption(
+            "LD Proxies are turned off, so PGS Grep searches for the exact "
+            "variant only."
+        )
+
     st.checkbox(
         "Hide unlinked variants",
         value=st.session_state["proxies_only"],
@@ -935,11 +949,17 @@ def render_scan_summary() -> None:
     start_window = s["target_pos"] - s["window_size"]
     end_window = s["target_pos"] + s["window_size"]
 
+    search_window_line = (
+        f"Chr{s['chromosome']}:{start_window:,} - {end_window:,} (±{s['window_size']:,} bp)"
+        if s["window_size"] > 0
+        else f"Chr{s['chromosome']}:{s['target_pos']:,} (exact position only, no flanking window)"
+    )
+
     st.subheader("Summary")
     lines = [
         f"- **File:** `{s['pgs_file_name']}`",
         f"- **Target rsID:** `{s['target_rsid']}` at Chr{s['chromosome']}:{s['target_pos']:,}",
-        f"- **Search window:** Chr{s['chromosome']}:{start_window:,} - {end_window:,}",
+        f"- **Search window:** {search_window_line}",
         f"- **Genome build:** {s['genome_build']}",
         f"- **LD Proxies:** {'Enabled (' + s['population'] + ', ' + s['ld_metric'] + ')' if wants_ld_proxies() else 'Disabled'}",
         f"- **Hide unlinked variants:** {'Yes' if s['proxies_only'] else 'No'}",

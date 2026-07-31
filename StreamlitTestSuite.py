@@ -913,30 +913,80 @@ def test_chromosome_widget_declares_standard_range_and_tooltip(gui_state):
     assert "25=MT" in number_input_call.kwargs["help"]
 
 
-# ── Input validation: Genomic Search Window flanking size floor ────────────
+# ── Genomic Search Window is an LD-proxy-only setting ───────────────────────
 
-def _set_step5_widgets(gui_state):
-    """Populate every widget key render_step5_config() unconditionally
-    reads (LD-proxy-specific widgets are only needed when want_ld_proxies
-    is 'Yes...', which these tests do not exercise)."""
+def _flanking_size_call():
+    """Find the recorded Flanking Size number_input call, if any."""
+    return next(
+        (c for c in gui.st.number_input.call_args_list
+         if c.args and c.args[0] == "Flanking Size (+/- base pairs)"),
+        None,
+    )
+
+
+def _set_step5_widgets_ld_off(gui_state):
+    """Populate every widget key render_step5_config() reads when LD
+    proxies are declined (the Flanking Size input does not exist in this
+    branch, since a window is meaningless without LD proxies)."""
     gui_state["genome_build_widget"] = gui_state["genome_build"]
-    gui_state["window_size_widget"] = gui_state["window_size"]
     gui_state["proxies_only_widget"] = gui_state["proxies_only"]
 
 
-def test_window_size_input_has_a_zero_floor(gui_state):
-    """The Flanking Size number_input must not allow negative windows,
-    which would produce a nonsensical (inverted) search range."""
+def _set_step5_widgets_ld_on(gui_state, ld_window_size=5_000, population="EUR"):
+    """Populate every widget key render_step5_config() reads when LD
+    proxies are enabled, using the default 'R² only' metric so only the
+    R² threshold slider (not D') is required."""
+    gui_state["genome_build_widget"] = gui_state["genome_build"]
+    gui_state["ld_window_size_widget"] = ld_window_size
+    gui_state["population_widget"] = population
+    gui_state["ld_metric_widget"] = gui_state["ld_metric"]
+    gui_state["r2_filter_widget"] = gui_state["r2_filter"]
+    gui_state["proxies_only_widget"] = gui_state["proxies_only"]
+
+
+def test_flanking_size_hidden_and_window_forced_to_zero_when_ld_proxies_off(gui_state):
+    """With LD proxies declined, the user is only looking for one variant,
+    so the Flanking Size input must not be shown at all, and the effective
+    search window must be forced to 0 (the exact target position only)."""
     gui_state["want_ld_proxies"] = "No, scan target position only"
-    _set_step5_widgets(gui_state)
+    gui_state["ld_window_size"] = 5_000  # a prior LD window choice, if any
+    _set_step5_widgets_ld_off(gui_state)
 
     gui.render_step5_config()
 
-    number_input_call = next(
-        c for c in gui.st.number_input.call_args_list
-        if c.args and c.args[0] == "Flanking Size (+/- base pairs)"
-    )
-    assert number_input_call.kwargs["min_value"] == 0
+    assert _flanking_size_call() is None
+    assert gui_state["window_size"] == 0
+
+
+def test_flanking_size_shown_with_positive_floor_when_ld_proxies_on(gui_state):
+    """With LD proxies enabled, the user is searching for more than one
+    variant, so the Flanking Size input must appear and reject zero/negative
+    windows (a window is required to find any proxies at all)."""
+    gui_state["want_ld_proxies"] = "Yes, also search LD proxies (requires a free token)"
+    _set_step5_widgets_ld_on(gui_state, ld_window_size=10_000)
+
+    gui.render_step5_config()
+
+    call = _flanking_size_call()
+    assert call is not None
+    assert call.kwargs["min_value"] == 1
+    assert gui_state["window_size"] == 10_000
+
+
+def test_ld_window_size_choice_survives_toggling_ld_proxies_off(gui_state):
+    """Turning LD proxies off and back on must not lose the user's
+    previously chosen flanking size — only the *effective* window used for
+    an LD-disabled scan should reset to 0, not the stored preference."""
+    gui_state["want_ld_proxies"] = "Yes, also search LD proxies (requires a free token)"
+    _set_step5_widgets_ld_on(gui_state, ld_window_size=25_000)
+    gui.render_step5_config()
+    assert gui_state["ld_window_size"] == 25_000
+
+    gui_state["want_ld_proxies"] = "No, scan target position only"
+    _set_step5_widgets_ld_off(gui_state)
+    gui.render_step5_config()
+    assert gui_state["window_size"] == 0
+    assert gui_state["ld_window_size"] == 25_000  # preference remembered
 
 
 # ═════════════════════════════════════════════════════════════════════════
