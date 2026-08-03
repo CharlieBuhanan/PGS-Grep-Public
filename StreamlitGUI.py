@@ -428,32 +428,32 @@ def render_step1_welcome() -> None:
     )
 
     with st.expander("ℹ️ Information on Key Terms", expanded=False):
-        st.markdown("""**Polygenic Score (PGS)**: A numeric score that estimates an individual's genetic predisposition to a trait or disease, based on the combined effect of many genetic variants.
-PGS files are published in the PGS Catalog (https://www.pgscatalog.org/) and detail the genetic variants and how much each contributes to a target disease.
+        st.markdown("""**Polygenic Score (PGS)**: A single number summarizing how much
+someone's genetics affect their likelihood of having a trait or disease, found from adding up small contributions
+from many genetic variants. A PGS file lists those variants and the weight each one carries towards the disease outcome.
 
-**SNP (Single Nucleotide Polymorphism)**: A single base pair location in the DNA
-sequence where individuals commonly differ. This app searches for SNPs by their position in the human genome.
+**SNP (Single Nucleotide Polymorphism)**: One position in the genome where the DNA
+letter (A, T, C, or G) varies between people. PGS Grep locates SNPs by their chromosome and position.
 
-**RSID (Reference SNP ID)**: A stable identifier, prefixed with "rs", that the NCBI dbSNP database assigns to a specific SNP. Because an RSID maps to a fixed chromosomal position, it lets this app look up the coordinates needed to search a PGS file.
+**RSID**: The "rs"-prefixed label assigns to a SNP, such as rs1260326. It is determined by dbSNP, a free public archive.
 
-**LD (Linkage Disequilibrium)**: A measure of how often two nearby genetic
-variants are inherited together. Variants close together on a chromosome tend to have a higher LD.
+**LD (Linkage Disequilibrium)**: The tendency of two nearby variants to appear together rather than being inherited independently.
 
-**LD Proxies**: SNPs that are in strong linkage disequilibrium with a target SNP, meaning
-they are usually inherited alongside it. They are useful because if an SNP is missing from a PGS file, a proxy that
-tracks closely with it can act as a stand-in and capture a similar
-genetic signal.
+**LD Proxy**: A variant closely linked to your target. When the target itself is absent
+from a PGS file, a proxy carries much of the same information.
 
-**LDLink API Access Token**: This optional token can be obtained for free at [LDLink API](https://ldlink.nih.gov/apiaccess), hosted and developed by the National Cancer Institute (NCI),
-part of the U.S. National Institutes of Health (NIH). This token authenticates a request for LD proxy data from the LDLink database, which allows this site to find variants correlated with your specified SNP. Your token is never stored or shared. If you choose to provide one, it will only be used for LDLink's API calls. You can see how your token is
-used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep-Public.""")
+**LDLink API Access Token**: A free credential from the National Cancer Institute's
+[LDLink service](https://ldlink.nih.gov/apiaccess), needed only for proxy searches. It
+identifies your requests to LDLink and nothing else. PGS Grep never stores or shares it;
+the [source code](https://github.com/CharlieBuhanan/PGS-Grep-Public) shows exactly how it
+is used.""")
 
     st.subheader("Before you start, consider:")
     st.markdown(
         """
 - A **target SNP RSID** (ex: rs1260326) that you want to locate
 - A Polygenic Score (PGS) file (or a publication on the PGS Catalog)
-- Whether or not you want to consider Linkage Disequilibrium in your results (this requires a free LDLink Token from the National Cancer Institute, see the [LDLink API](https://ldlink.nih.gov/apiaccess))
+- Whether or not you want to consider Linkage Disequilibrium in your results (this requires a free [LDLink Token](https://ldlink.nih.gov/apiaccess) from the National Cancer Institute)
         """
     )
 
@@ -502,11 +502,10 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
 """)    
         st.markdown("""
 4. Download the **harmonized** scoring file. Filename ends in `_hmPOS_GRCh38.txt.gz`
-   or `_hmPOS_GRCh37.txt.gz`, depending on the genome build.""", help = "The genome build GRCh38 (hg38) and GRCh37 (hg19) specifies the reference human genome assembly used to define the chromosomal coordinates of the SNPs in the file. Be sure to download the harmonized version of the score  file for your desired genome build.")
+   or `_hmPOS_GRCh37.txt.gz`, depending on the genome build.""", help = "GRCh38 (hg38) and GRCh37 (hg19) are two reference assemblies, and a variant sits at a different position in each. Pick the build you will look your rsID up in.")
 
-        st.markdown("5. Download the optional corresponding MD5 file if you want to verify the download's integrity.", help = "Optional. The .md5 / .txt checksum file from the PGS Catalog is "
-                 "used to confirm your download was not corrupted or truncated.")
-        st.markdown("6. No need to unzip. Upload the `.txt.gz` file directly below and the MD5 file if you have it. 200 megabytes is the maximum size for file uploads.", help="PGS Grep can read the .gz zipped file type directly. No zipped files on the PGS Catalogue exceed 200 MB as of June 2026.")
+        st.markdown("5. Download the optional corresponding MD5 file if you want to verify the download's integrity.", help = "A checksum file (.md5 or .txt) that PGS Grep can use to confirm the download arrived intact.")
+        st.markdown("6. No need to unzip. Upload the `.txt.gz` file directly below and the MD5 file if you have it. 200 megabytes is the maximum size for file uploads.", help="PGS Grep reads .gz files as-is. No PGS Catalog score file exceeds 200 MB as of June 2026.")
 
     col_upload, col_md5 = st.columns([1,1])
     with col_upload:
@@ -515,7 +514,7 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
             "Upload file", type=["gz"], label_visibility="collapsed"
         )
     with col_md5:
-        st.markdown("**MD5 Checksum** *(optional)*", help = "Optional. The .md5 / .txt checksum file from the PGS Catalog is used to confirm your download was not corrupted or truncated.")
+        st.markdown("**MD5 Checksum** *(optional)*", help = "A checksum file (.md5 or .txt) that PGS Grep can use to confirm the download arrived intact.")
         uploaded_md5 = st.file_uploader(
             "Upload MD5", type=["md5"], key="md5_uploader",
             label_visibility="collapsed",
@@ -578,7 +577,7 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
         if st.session_state.get("pgs_file_is_harmonized") is False:
             st.error(
                 "**This does not look like a harmonized PGS file.** No harmonized-build "
-                "metadata (`hm_pos`) was found, and the filename does not include `_hmPOS_`. "
+                "metadata was found, and the filename does not include `_hmPOS_`. "
                 "Please re-download the **harmonized** version of this score from the PGS Catalog's "
                 "'Harmonized' folder (see the instructions above) before continuing."
             )
@@ -621,10 +620,9 @@ def render_step3_rsid_guide() -> None:
     """
     st.header("Locate Your Target RSID")
     st.markdown(
-        "An **rsID** (e.g. `rs1260326`) is a unique reference ID assigned to a "
-        "specific SNP in NCBI's dbSNP database. This tool searches by "
-        "**chromosomal position**, not by rsID directly, so you will need to look "
-        "up your target SNP's coordinates first."
+        "PGS files are indexed by **chromosomal position**, not by rsID, so your "
+        "target variant (e.g. `rs1260326`) has to be translated into coordinates "
+        "before the scan can run."
     )
 
     detected_build = get_display_build(st.session_state["preview_metadata"])
@@ -632,13 +630,14 @@ def render_step3_rsid_guide() -> None:
     st.subheader("How to find the coordinates")
     st.markdown(
         f"""
-1. Open the [NCBI Genome Data Viewer](https://www.ncbi.nlm.nih.gov/gdv). This resource is managed by the National Library of Medicine and provides a visual interface to explore genomic data.
+1. Open the [NCBI Genome Data Viewer](https://www.ncbi.nlm.nih.gov/gdv), a browser for
+   genomic data run by the National Library of Medicine.
 2. Search for your rsID (e.g. `rs1260326`).
-3. **Set the reference assembly to match your uploaded PGS file: `{detected_build}`.**
-   Coordinates differ between assemblies, so using the wrong one will point you
-   to the wrong position.
-4. Note down the **chromosome number** and **base-pair position** shown for
-   that assembly, or keep the tab open. You will need this to fill in the fields below.
+3. **Set the reference assembly to `{detected_build}` to match your uploaded PGS file.**
+   The same variant sits at different coordinates in different assemblies, so a
+   mismatch here sends the scan to the wrong place.
+4. Copy down the **chromosome number** and **base-pair position** listed for that
+   assembly, or leave the tab open, and fill them in below.
         """
     )
 
@@ -657,9 +656,8 @@ def render_step3_rsid_guide() -> None:
         "Target rsID (must match center position)",
         value=st.session_state["target_rsid"],
         key="target_rsid_widget",
-        help="The rsID (e.g. rs1260326) you looked up above. Must start with "
-             "\"rs\" followed by digits only. Used to label results and, if LD "
-             "proxies are enabled, as the query variant for the LDlink lookup.",
+        help="Format: \"rs\" followed by digits, e.g. rs1260326. Labels your results "
+             "and, with LD proxies on, is the variant sent to LDlink.",
     )
     st.session_state["target_rsid"] = st.session_state["target_rsid_widget"]
     rsid_valid = is_valid_rsid(st.session_state["target_rsid"])
@@ -679,11 +677,8 @@ def render_step3_rsid_guide() -> None:
         value=st.session_state["target_pos_text"],
         key="target_pos_text_widget",
         on_change=_sync_target_pos_from_text,
-        help="The base-pair position of your target variant, e.g. from NCBI's "
-             "Genome Data Viewer. You can paste it with or without comma "
-             "separators (e.g. 27508073 or 27,508,073). Must be a positive "
-             "whole number. The scan searches for variants at this position, "
-             "plus a window configured later.",
+        help="Base-pair position from the Genome Data Viewer. Commas are fine "
+             "(27,508,073 and 27508073 both work). Must be a positive whole number.",
     )
     st.session_state["target_pos_text"] = st.session_state["target_pos_text_widget"]
     cleaned_target_pos = st.session_state["target_pos_text"].replace(",", "").replace(" ", "").strip()
@@ -697,11 +692,9 @@ def render_step3_rsid_guide() -> None:
         build_options,
         index=build_options.index(st.session_state["genome_build"]),
         key="genome_build_widget",
-        help="The reference genome assembly your rsID, chromosome, and position "
-             "above are based on. Auto-filled from your uploaded PGS file when "
-             "available; change it only if you looked up coordinates in a "
-             "different build than the file uses. This is fixed for the rest "
-             "of the wizard once you move past this step.",
+        help="The reference assembly your PGS file is harmonized to, auto-detected from its "
+             "metadata (defaults to GRCh38 if none found). A mismatch means no proxies will be found. Only change it if the "
+             "detected value is wrong.",
     )
     st.session_state["genome_build"] = st.session_state["genome_build_widget"]
 
@@ -726,10 +719,11 @@ def render_step4_ld_choice() -> None:
     st.header("Search for LD Proxies?")
     st.markdown(
         """
-**LD proxies** are nearby SNPs that tend to be inherited together with your
-target SNP (they are in *linkage disequilibrium*). If your exact target SNP
-is not in the PGS file, a proxy can act as a stand-in that captures a
-similar genetic signal.
+An **LD proxy** is a neighboring SNP that is usually inherited together with your
+target, so it carries much of the same information. Turning this on creates a search
+window around your target position and reports any variants linked closely to it,
+which is useful when the target is missing from the PGS file. Leaving it off
+searches only your target position.
         """
     )
 
@@ -764,25 +758,24 @@ def render_step4_5_ld_auth() -> None:
     """
     st.header("LDLink API Token")
     st.markdown(
-        "LD proxy lookups are powered by the **LDlink API**, a free service run "
-        "by the National Cancer Institute. It requires a personal access "
-        "token to authenticate requests. This "
-        "app only uses it to make LD queries on your behalf during this session."
+        "Proxy lookups run through the **LDlink API**, a free service from the "
+        "National Cancer Institute. Requests must carry a personal token, which "
+        "you can register for in a couple of minutes."
     )
-    st.caption("LDLink API Access Token: This optional token can be obtained for free at [LDLink API](https://ldlink.nih.gov/apiaccess), hosted and developed by the National Cancer Institute (NCI), "
-        "part of the U.S. National Institutes of Health (NIH). This token authenticates a request for LD proxy data from the LDLink database. "
-        "Your token is never stored or shared. If you choose to provide one, it will only be used for LDLink's API calls. You can see how your token is "
-        "used by inspecting the source code at https://github.com/CharlieBuhanan/PGS-Grep-Public.")
+    st.caption(
+        "Your token is used only for this session's LDlink queries. It is never stored "
+        "or shared, and the "
+        "[source code](https://github.com/CharlieBuhanan/PGS-Grep-Public) shows how it "
+        "is handled."
+    )
     st.markdown("[Get a free token here (ldlink.nih.gov)](https://ldlink.nih.gov/apiaccess)")
-    
 
     st.text_input(
         "LDLink API Token",
         value=st.session_state["ldlink_token"],
         type="password",
         key="ldlink_token_widget",
-        help="Your token is only used for this session's LDlink API calls. "
-             "Identical queries are cached locally for future runs.",
+        help="Results are cached locally, so repeating a query skips the API call.",
     )
     st.session_state["ldlink_token"] = st.session_state["ldlink_token_widget"]
     token_value = st.session_state["ldlink_token"].strip()
@@ -857,11 +850,9 @@ def render_step5_config() -> None:
             step=1_000,
             value=st.session_state["ld_window_size"],
             key="ld_window_size_widget",
-            help="LD Proxies are enabled, so the scan checks every variant within "
-                 "this many base pairs of your target position and reports any "
-                 "that are in linkage disequilibrium (LD) with your target SNP, "
-                 "in addition to the exact target itself. Must be a positive "
-                 "whole number.",
+            help="How far to either side of the target position the scan looks for "
+                 "linked variants. Wider windows catch more proxies but take longer. "
+                 "Must be a positive whole number.",
         )
         st.session_state["ld_window_size"] = st.session_state["ld_window_size_widget"]
         st.session_state["window_size"] = st.session_state["ld_window_size"]
@@ -872,11 +863,11 @@ def render_step5_config() -> None:
             population_options,
             index=population_options.index(st.session_state["population"]),
             key="population_widget",
-            help="The 1000 Genomes super-population used to calculate LD. This "
-                 "matters because LD patterns differ by ancestry; proxies "
-                 "strongly linked in one population may not be linked in "
-                 "another. EUR = European, AMR = Admixed American, "
-                 "AFR = African, EAS = East Asian, SAS = South Asian. ",
+            help="Reference population for the LD calculation. Linkage varies by "
+                 "ancestry, so a strong proxy in one group may be unlinked in another. "
+                 "Match your study cohort where possible. EUR = European, "
+                 "AMR = Admixed American, AFR = African, EAS = East Asian, "
+                 "SAS = South Asian.",
         )
         st.session_state["population"] = st.session_state["population_widget"]
         population_selected = st.session_state["population"] != "Choose..."
@@ -888,9 +879,9 @@ def render_step5_config() -> None:
             ["R² only", "D′ only", "R² and D′ (both must pass)"],
             index=["R² only", "D′ only", "R² and D′ (both must pass)"].index(st.session_state["ld_metric"]),
             key="ld_metric_widget",
-            help="Which LD statistic(s) a candidate proxy must pass its threshold "
-                 "on to be kept. R² measures correlation between alleles; "
-                 "D′ measures maximum possible LD.",
+            help="Which statistic a proxy must clear to be kept. R² reflects how well "
+                 "one variant predicts the other; D′ reflects how complete the linkage "
+                 "is, ignoring allele frequency.",
         )
         st.session_state["ld_metric"] = st.session_state["ld_metric_widget"]
         use_r2 = st.session_state["ld_metric"] in ("R² only", "R² and D′ (both must pass)")
@@ -899,16 +890,16 @@ def render_step5_config() -> None:
             st.slider(
                 "R² Threshold", 0.0, 1.0, step=0.05,
                 value=st.session_state["r2_filter"], key="r2_filter_widget",
-                help="Minimum R² (allele correlation) a candidate proxy must have "
-                     "with the target SNP to be kept. Higher = stricter, fewer proxies.",
+                help="Lowest R² a proxy may have with the target. Raise it for fewer, "
+                     "tighter-linked proxies.",
             )
             st.session_state["r2_filter"] = st.session_state["r2_filter_widget"]
         if use_dprime:
             st.slider(
                 "D′ Threshold", 0.0, 1.0, step=0.05,
                 value=st.session_state["dprime_filter"], key="dprime_filter_widget",
-                help="Minimum D′ (normalized LD coefficient) a candidate proxy must "
-                     "have with the target SNP to be kept. Higher = stricter, fewer proxies.",
+                help="Lowest D′ a proxy may have with the target. Raise it for fewer, "
+                     "tighter-linked proxies.",
             )
             st.session_state["dprime_filter"] = st.session_state["dprime_filter_widget"]
 
@@ -923,8 +914,8 @@ def render_step5_config() -> None:
             "Hide unlinked variants",
             value=st.session_state["proxies_only"],
             key="proxies_only_widget",
-            help="Hide variants in the window that are neither the exact target nor a qualifying LD proxy. "
-                 "Applies to both the on-screen table and the exported CSV.",
+            help="Drop variants that are neither the target nor a qualifying proxy. "
+                 "Affects the table and the exported CSV alike.",
         )
         st.session_state["proxies_only"] = st.session_state["proxies_only_widget"]
     else:
@@ -1190,6 +1181,7 @@ def render_step6_execute() -> None:
     if st.button("Execute Genomic Scan", type="primary", width='stretch'):
         run_scan()
         st.rerun()
+    st.caption("Most scans finish in about 10 seconds.")
 
     if st.session_state["scan_results"] is not None:
         st.divider()
