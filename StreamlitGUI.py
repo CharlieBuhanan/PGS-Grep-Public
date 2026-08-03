@@ -607,13 +607,17 @@ def render_step3_rsid_guide() -> None:
     base-pair position) of their target RSID, using the genome build
     parsed from the PGS file they just uploaded as the correct reference
     assembly to select in NCBI's Genome Data Viewer, then collect the
-    target rsID, chromosome, and center position directly on this step.
+    target rsID, chromosome, center position, and genome build directly
+    on this step. Genome build is grouped with the coordinates here (and
+    is only editable here) because a chromosome/position pair is only
+    meaningful together with the assembly it was looked up in.
 
-    These three fields are bound to durable session_state keys
-    ("target_rsid", "chromosome", "target_pos"/"target_pos_text") via the
-    widget/durable key split described in the module docstring, so their
-    values survive navigating to other steps or triggering a script
-    rerun, and are later restated read-only in Step 5.
+    These four fields are bound to durable session_state keys
+    ("target_rsid", "chromosome", "target_pos"/"target_pos_text",
+    "genome_build") via the widget/durable key split described in the
+    module docstring, so their values survive navigating to other steps
+    or triggering a script rerun, and are later restated read-only in
+    Step 5.
     """
     st.header("Locate Your Target RSID")
     st.markdown(
@@ -686,6 +690,20 @@ def render_step3_rsid_guide() -> None:
     position_valid = cleaned_target_pos.isdigit() and int(cleaned_target_pos) > 0
     if not position_valid:
         st.caption("⚠️ Enter a positive whole number, digits only (commas are fine)")
+
+    build_options = ["GRCh38", "GRCh37"]
+    st.selectbox(
+        "Genome Build",
+        build_options,
+        index=build_options.index(st.session_state["genome_build"]),
+        key="genome_build_widget",
+        help="The reference genome assembly your rsID, chromosome, and position "
+             "above are based on. Auto-filled from your uploaded PGS file when "
+             "available; change it only if you looked up coordinates in a "
+             "different build than the file uses. This is fixed for the rest "
+             "of the wizard once you move past this step.",
+    )
+    st.session_state["genome_build"] = st.session_state["genome_build_widget"]
 
     st.write("")
     col_back, col_next = st.columns(2)
@@ -791,13 +809,15 @@ def render_step4_5_ld_auth() -> None:
 
 def render_step5_config() -> None:
     """
-    Restate the target rsID, chromosome, position, and detected genome
-    build collected in Step 3 as read-only fields, then collect LD proxy
-    settings and output filtering preferences. The flanking genomic search
-    window is only user-configurable when LD proxies are enabled (Step 4);
-    otherwise the scan searches for the single exact target position, and
-    'window_size' is forced to 0. The genome build used for the scan is
-    pre-filled from Step 2's metadata extraction when available.
+    Restate the target rsID, chromosome, position, and genome build
+    collected in Step 3 as read-only fields (genome build is only
+    user-editable there, right alongside the coordinates it applies to,
+    since a chromosome/position pair is meaningless without knowing which
+    assembly it was looked up in), then collect LD proxy settings and
+    output filtering preferences. The flanking genomic search window is
+    only user-configurable when LD proxies are enabled (Step 4); otherwise
+    the scan searches for the single exact target position, and
+    'window_size' is forced to 0.
     """
     st.header("Search Configuration")
 
@@ -810,19 +830,11 @@ def render_step5_config() -> None:
         disabled=True,
     )
 
-    col_build, col_chr = st.columns(2)
-    with col_build:
-        st.text_input(
-            "Detected Genome Build (from harmonized file)",
-            value=get_display_build(st.session_state["preview_metadata"]),
-            disabled=True,
-        )
-    with col_chr:
-        st.number_input(
-            "Chromosome #",
-            value=st.session_state["chromosome"],
-            disabled=True,
-        )
+    st.number_input(
+        "Chromosome #",
+        value=st.session_state["chromosome"],
+        disabled=True,
+    )
 
     st.text_input(
         "Center Position (target variant position)",
@@ -830,18 +842,11 @@ def render_step5_config() -> None:
         disabled=True,
     )
 
-    st.subheader("Genome Assembly")
-    build_options = ["GRCh38", "GRCh37"]
-    st.selectbox(
-        "Genome Assembly Used for Search",
-        build_options,
-        index=build_options.index(st.session_state["genome_build"]),
-        key="genome_build_widget",
-        help="The reference genome assembly your coordinates are in. "
-             "Auto-filled from your uploaded PGS file when available; "
-             "change it only if you looked up coordinates in a different build.",
+    st.text_input(
+        "Genome Build",
+        value=st.session_state["genome_build"],
+        disabled=True,
     )
-    st.session_state["genome_build"] = st.session_state["genome_build_widget"]
 
     population_selected = True
     if wants_ld_proxies():

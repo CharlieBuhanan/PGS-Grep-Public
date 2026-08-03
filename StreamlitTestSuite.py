@@ -903,13 +903,14 @@ def test_token_with_embedded_space_blocks_next_and_warns(gui_state):
 
 # ── Input validation: Target rsID must match the "rs" + digits format ──────
 
-def _set_step3_widgets(gui_state, rsid="rs1260326", chromosome=2, position_text="27,508,073"):
+def _set_step3_widgets(gui_state, rsid="rs1260326", chromosome=2, position_text="27,508,073", genome_build="GRCh38"):
     """Populate every widget key render_step3_rsid_guide() reads. Mirrors
     what real Streamlit would already have written into session_state from
     user interaction before the script rerun that calls this function."""
     gui_state["target_rsid_widget"] = rsid
     gui_state["chromosome_widget"] = chromosome
     gui_state["target_pos_text_widget"] = position_text
+    gui_state["genome_build_widget"] = genome_build
 
 
 def test_garbage_rsid_blocks_next_and_shows_warning(gui_state):
@@ -1075,15 +1076,14 @@ def _set_step5_widgets_ld_off(gui_state):
     proxies are declined. Neither the Flanking Size input nor the 'Hide
     unlinked variants' checkbox exist in this branch, since a window (and
     unlinked-vs-linked filtering within it) is meaningless without LD
-    proxies."""
-    gui_state["genome_build_widget"] = gui_state["genome_build"]
+    proxies. Genome build is read-only on this step (set in Step 3), so
+    there is no widget key for it here."""
 
 
 def _set_step5_widgets_ld_on(gui_state, ld_window_size=5_000, population="EUR"):
     """Populate every widget key render_step5_config() reads when LD
     proxies are enabled, using the default 'R² only' metric so only the
     R² threshold slider (not D') is required."""
-    gui_state["genome_build_widget"] = gui_state["genome_build"]
     gui_state["ld_window_size_widget"] = ld_window_size
     gui_state["population_widget"] = population
     gui_state["ld_metric_widget"] = gui_state["ld_metric"]
