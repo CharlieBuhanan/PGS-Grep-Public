@@ -221,6 +221,25 @@ def wants_ld_proxies() -> bool:
     return st.session_state["want_ld_proxies"].startswith("Yes")
 
 
+def active_ld_thresholds() -> tuple[float | None, float | None]:
+    """
+    Return the (r2_threshold, dprime_threshold) actually in effect, based on
+    the "Filter proxies by" choice (Step 5). Only the threshold(s) matching
+    that choice are non-None; the other is forced to None regardless of its
+    stored slider value, so a stale/unused threshold (e.g. the R² slider's
+    value when "D' only" is selected) can never silently get applied to the
+    scan or misreported in the CSV output header.
+    """
+    if not wants_ld_proxies():
+        return None, None
+    ld_metric = st.session_state["ld_metric"]
+    use_r2 = ld_metric in ("R² only", "R² and D′ (both must pass)")
+    use_dprime = ld_metric in ("D′ only", "R² and D′ (both must pass)")
+    r2_threshold = st.session_state["r2_filter"] if use_r2 else None
+    dprime_threshold = st.session_state["dprime_filter"] if use_dprime else None
+    return r2_threshold, dprime_threshold
+
+
 def go_to_next_step() -> None:
     """
     Advance the wizard to the next step in the fixed STEP_ORDER sequence,
@@ -783,7 +802,7 @@ def render_step5_config() -> None:
     st.header("Search Configuration")
 
     st.subheader("Target Variant")
-    st.caption("Set in the previous step. Go Back to change these values.")
+    st.caption("Set in a previous step. Go Back to change these values.")
 
     st.text_input(
         "Target rsID",
@@ -966,10 +985,13 @@ def run_scan() -> None:
     """
     Execute the genomic scan using the cached PGS file and configuration,
     then store the results in session_state so they survive accidental
-    reruns. The progress bar is deliberately capped below 100% for the
-    duration of the scan and is only set to 1.0 once execute_scan() has
-    actually returned, so it can never visually claim completion before
-    the underlying work is done.
+    reruns. The progress bar reserves its last stretch for real
+    post-scan work rather than claiming completion early: reading the
+    file is capped at PROGRESS_CAP (90%), and the remaining 10% covers
+    building the filtered export DataFrame and encoding the downloadable
+    CSV (both cached in session_state here so render_results() never has
+    to redo them on a later rerun). The bar only reaches 1.0 once all of
+    that has actually finished.
     """
     s = st.session_state
     start_window = s["target_pos"] - s["window_size"]
@@ -980,12 +1002,13 @@ def run_scan() -> None:
 
     with status_placeholder.container():
         if wants_ld_proxies():
+            r2_threshold, dprime_threshold = active_ld_thresholds()
             with st.spinner("Fetching / loading LD proxy map…"):
                 engine.fetch_ld_proxies(
                     target_rsid=s["target_rsid"],
                     genome_build=s["genome_build"],
-                    r2_threshold=s.get("r2_filter"),
-                    dprime_threshold=s.get("dprime_filter"),
+                    r2_threshold=r2_threshold,
+                    dprime_threshold=dprime_threshold,
                     population=s["population"],
                 )
             if not engine.ld_map:
@@ -997,29 +1020,21 @@ def run_scan() -> None:
         progress_bar = st.progress(0, text="Starting scan…")
         progress_status = st.empty()
 
-        PROGRESS_CAP = 0.99
+        PROGRESS_CAP = 0.90
 
         def on_scan_progress(current_pos: int, percent_complete: float, variants_found: int) -> None:
             """
             Callback passed into engine.execute_scan(), invoked periodically during the scan.
 
             Args:
-                current_pos:       Base-pair position currently being read.
-                percent_complete:  Fraction (0.0-1.0) of the way through the search window.
+                current_pos:       Base-pair position currently being read (unused; scans are
+                                    fast enough that a bare percentage is all that's worth showing).
+                percent_complete:  Fraction (0.0-1.0) of the way through the file.
                 variants_found:    Number of matching variants found so far.
-
-            Displayed position is clamped to the search window because the
-            backend's read/parse loop can occasionally report a position
-            past end_window (e.g. a final buffered read overshooting the
-            window edge).
             """
             clamped = max(0.0, min(PROGRESS_CAP, percent_complete))
             pct = int(clamped * 100)
-            display_pos = max(start_window, min(current_pos, end_window))
-            progress_bar.progress(
-                clamped,
-                text=f"Scanning… {pct}% (position {display_pos:,} of Chr{s['chromosome']}:{start_window:,}-{end_window:,})",
-            )
+            progress_bar.progress(clamped, text=f"Scanning… {pct}%")
             progress_status.caption(f"Variants in window so far: **{variants_found}**")
 
         file_object = io.BytesIO(s["pgs_file_bytes"])
@@ -1032,6 +1047,27 @@ def run_scan() -> None:
             target_rsid=s["target_rsid"],
             progress_callback=on_scan_progress,
         )
+
+        progress_bar.progress(PROGRESS_CAP, text="Formatting results…")
+
+        if s["proxies_only"]:
+            export_df = results_df[results_df["Match_Status"].str.contains("PROXY|EXACT", na=False)]
+        else:
+            export_df = results_df
+
+        r2_threshold, dprime_threshold = active_ld_thresholds()
+        csv_credit_line = "# Charlie Buhanan, PGS Grep V1.1, 2026\n"
+        header_comments = appV3.build_output_header(
+            metadata=engine.last_metadata,
+            target_rsid=s["target_rsid"],
+            population=s.get("population") if wants_ld_proxies() else None,
+            genome_build=s["genome_build"],
+            r2_threshold=r2_threshold,
+            dprime_threshold=dprime_threshold,
+        )
+        csv_data = export_df.to_csv(index=False)
+        csv_bytes = (csv_credit_line + header_comments + csv_data).encode("utf-8")
+
         progress_bar.progress(1.0, text="Scan complete!")
 
     status_placeholder.empty()
@@ -1040,6 +1076,8 @@ def run_scan() -> None:
         "exact_match": exact_match,
         "proxy_matches": proxy_matches,
         "results_df": results_df,
+        "export_df": export_df,
+        "csv_bytes": csv_bytes,
         "last_metadata": engine.last_metadata,
     }
 
@@ -1051,6 +1089,8 @@ def render_results() -> None:
     exact_match = results["exact_match"]
     proxy_matches = results["proxy_matches"]
     results_df = results["results_df"]
+    export_df = results["export_df"]
+    csv_bytes = results["csv_bytes"]
     last_metadata = results["last_metadata"]
 
     st.subheader("📄 Source File Data")
@@ -1096,10 +1136,6 @@ def render_results() -> None:
         return
 
     st.subheader("📋 Data Viewer")
-    if s["proxies_only"]:
-        export_df = results_df[results_df["Match_Status"].str.contains("PROXY|EXACT", na=False)]
-    else:
-        export_df = results_df
     display_df = export_df.copy()
 
     if s["proxies_only"]:
@@ -1124,18 +1160,6 @@ def render_results() -> None:
     if not display_df.empty:
         styled = display_df.style.map(highlight_status, subset=["Match_Status"])
         st.dataframe(styled, width='stretch', hide_index=True)
-
-    csv_credit_line = "# Charlie Buhanan, PGS Grep V1.1, 2026\n"
-    header_comments = appV3.build_output_header(
-        metadata=last_metadata,
-        target_rsid=s["target_rsid"],
-        population=s.get("population"),
-        genome_build=s["genome_build"],
-        r2_threshold=s.get("r2_filter"),
-        dprime_threshold=s.get("dprime_filter"),
-    )
-    csv_data = export_df.to_csv(index=False)
-    csv_bytes = (csv_credit_line + header_comments + csv_data).encode("utf-8")
 
     st.write("")
     st.download_button(

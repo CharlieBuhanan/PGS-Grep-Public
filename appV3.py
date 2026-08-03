@@ -13,6 +13,7 @@
 import gzip
 import io
 import os
+import struct
 from datetime import date
 from typing import Final
 import streamlit as st # type: ignore
@@ -40,6 +41,31 @@ def normalize_chr(chr_value: str) -> str:
     if c in LDLINK_SEX_MT_CODES:
         return LDLINK_SEX_MT_CODES[c]
     return c
+
+
+def _gzip_uncompressed_size(file_object) -> int | None:
+    """
+    Return a gzip file's original (decompressed) size in bytes, read
+    directly from its trailing ISIZE field (RFC 1952) instead of actually
+    decompressing it. Used only to estimate scan progress against real file
+    size; returns None if the trailer can't be read (e.g. an empty file),
+    in which case callers should fall back to a coarser progress estimate.
+
+    ISIZE stores the size modulo 2**32, so this is exact for any file under
+    ~4 GB, comfortably above this app's upload size cap.
+    """
+    try:
+        if isinstance(file_object, str):
+            with open(file_object, "rb") as f:
+                f.seek(-4, os.SEEK_END)
+                trailer = f.read(4)
+        else:
+            file_object.seek(-4, os.SEEK_END)
+            trailer = file_object.read(4)
+            file_object.seek(0)
+        return struct.unpack("<I", trailer)[0]
+    except Exception:
+        return None
 
 
 # Canonical output columns (always emitted in this order)
@@ -145,7 +171,7 @@ def extract_pgs_metadata(file_object) -> dict:
 def build_output_header(
     metadata: dict,
     target_rsid: str,
-    population: str,
+    population: str | None,
     genome_build: str,
     r2_threshold: float | None = None,
     dprime_threshold: float | None = None,
@@ -156,7 +182,8 @@ def build_output_header(
     Args:
         metadata:          Dict returned by extract_pgs_metadata().
         target_rsid:       The queried rsID.
-        population:        LD population code.
+        population:        LD population code, or None/falsy if LD proxies
+                            were not used for this scan (renders "Disabled").
         genome_build:      Genome assembly string.
         r2_threshold:      r^2 linkage filter applied, or None if not used.
         dprime_threshold:  D' linkage filter applied, or None if not used.
@@ -164,6 +191,7 @@ def build_output_header(
     Returns:
         A multi-line string of '#'-prefixed comment lines.
     """
+    population_str = population if population else "Disabled"
     # Build human-readable LD filter description
     if r2_threshold is not None and dprime_threshold is not None:
         ld_filter_str = f"r^2 >= {r2_threshold} AND D' >= {dprime_threshold}"
@@ -190,7 +218,7 @@ def build_output_header(
         "#",
         "# === Query Parameters ===",
         f"# Target rsID: {target_rsid}",
-        f"# LD Population: {population}",
+        f"# LD Population: {population_str}",
         f"# Genome Assembly: {genome_build}",
         f"# LD Filter: {ld_filter_str}",
         "#",
@@ -387,23 +415,37 @@ class PGSScanEngine:
             end_window:         End of the genomic search window.
             target_rsid:        rsID of the target variant (used as fallback label).
             progress_callback:  Optional callable(current_pos, percent_complete, variants_found).
-                                Called every PROGRESS_INTERVAL data lines on the
-                                target chromosome. percent_complete is the SNP's
-                                fractional position within [start_window, end_window],
-                                clamped to [0.0, 1.0], so the bar reflects how far
-                                through the search window the scan actually is
-                                rather than how many lines have been read.
+                                Called every PROGRESS_INTERVAL data lines.
+                                percent_complete is (approximate decompressed
+                                bytes read so far) / (the file's actual
+                                decompressed size, read from its gzip
+                                trailer), clamped to [0.0, 1.0], so the bar
+                                reflects real progress through the whole
+                                file. Falls back to the SNP's fractional
+                                position within [start_window, end_window]
+                                (updated only on the target chromosome) if
+                                the file's decompressed size can't be read.
         """
         PROGRESS_INTERVAL = 500
 
-        exact_match:    bool = False
-        proxy_matches:  list = []
-        rows_processed: list = []
-        lines_read:     int  = 0
+        exact_match:      bool = False
+        proxy_matches:    list = []
+        rows_processed:   list = []
+        lines_read:       int  = 0
+        bytes_read_approx: int = 0
         target_chr_str = normalize_chr(chr_number)
+        # Last position actually seen on the target chromosome, shown for
+        # every progress update (including the byte-based ones fired while
+        # reading other chromosomes) so the displayed position only ever
+        # advances within the target chromosome instead of jumping to
+        # whatever unrelated position happened to trigger that tick.
+        last_target_pos = start_window
 
         # Extract metadata before scanning (resets seek position internally)
         self.last_metadata = extract_pgs_metadata(file_object)
+
+        # Read once from the gzip trailer; None if unavailable (fallback path below)
+        total_size = _gzip_uncompressed_size(file_object)
 
         ld_rsid_by_pos: dict[int, str] = {
             pos: info["rsid"] for pos, info in self.ld_map.items()
@@ -419,6 +461,7 @@ class PGSScanEngine:
 
         with opener as f:
             for raw_line in f:
+                bytes_read_approx += len(raw_line)
                 line = raw_line.rstrip("\n")
 
                 if line.startswith("#") or not line.strip():
@@ -454,10 +497,19 @@ class PGSScanEngine:
                 except ValueError:
                     continue
 
+                if c_name == target_chr_str:
+                    last_target_pos = current_pos
+
+                if progress_callback and total_size and lines_read % PROGRESS_INTERVAL == 0:
+                    pct = max(0.0, min(1.0, bytes_read_approx / total_size))
+                    progress_callback(last_target_pos, pct, len(rows_processed))
+
                 if c_name != target_chr_str:
                     continue
 
-                if progress_callback and lines_read % PROGRESS_INTERVAL == 0:
+                if progress_callback and not total_size and lines_read % PROGRESS_INTERVAL == 0:
+                    # Fallback when the file's decompressed size isn't available:
+                    # approximate progress by position within the search window.
                     window_span = end_window - start_window
                     if window_span > 0:
                         pct = (current_pos - start_window) / window_span

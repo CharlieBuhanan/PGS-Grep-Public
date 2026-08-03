@@ -314,6 +314,109 @@ def test_results_df_serialises_to_csv(engine, pgs_file):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# _gzip_uncompressed_size and byte-based scan progress
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_gzip_uncompressed_size_matches_content_from_file_like():
+    """The ISIZE trailer read must equal the real decompressed byte length,
+    for a file-like (Streamlit UploadedFile-style) input."""
+    gz = make_gz(PGS_TSV)
+    assert appV3._gzip_uncompressed_size(gz) == len(PGS_TSV.encode("utf-8"))
+
+
+def test_gzip_uncompressed_size_matches_content_from_path(tmp_path):
+    """Same trailer read, but given a string file path instead of a
+    file-like object."""
+    path = tmp_path / "sample.txt.gz"
+    path.write_bytes(make_gz(PGS_TSV).read())
+    assert appV3._gzip_uncompressed_size(str(path)) == len(PGS_TSV.encode("utf-8"))
+
+
+def test_gzip_uncompressed_size_returns_none_for_unreadable_input():
+    """A buffer too short to contain a gzip trailer must not raise; it
+    should return None so callers can fall back gracefully."""
+    assert appV3._gzip_uncompressed_size(io.BytesIO(b"")) is None
+
+
+def test_execute_scan_progress_uses_byte_based_percent_off_target_chromosome(engine):
+    """Regression test: progress must be reported from real file-read
+    progress (bytes read vs. the file's actual decompressed size), not just
+    from position-within-window on the target chromosome. Built from 600
+    rows all on a chromosome that never matches the query, so the old
+    window-proximity-only callback (which fired solely on target-chromosome
+    rows) would never have fired mid-scan; the byte-based path must fire
+    regardless of chromosome match."""
+    rows = [
+        f"5\t{1000 + i}\trs{1000 + i}\tT\tC\t0.01"
+        for i in range(600)
+    ]
+    content = "chr_name\tchr_position\trsID\teffect_allele\tother_allele\teffect_weight\n" + "\n".join(rows) + "\n"
+    big_file = make_gz(content)
+
+    seen_percents = []
+
+    def on_progress(current_pos, percent_complete, variants_found):
+        seen_percents.append(percent_complete)
+
+    engine.execute_scan(
+        file_object=big_file,
+        chr_number=99,  # never matches "5", so window-proximity fallback can't fire
+        target_pos=1,
+        start_window=1,
+        end_window=1,
+        target_rsid="rs0",
+        progress_callback=on_progress,
+    )
+
+    # At least one mid-scan callback (interval-based) plus the guaranteed final 1.0 call.
+    assert len(seen_percents) >= 2
+    assert all(0.0 <= p <= 1.0 for p in seen_percents)
+    assert seen_percents == sorted(seen_percents)
+    assert seen_percents[-1] == 1.0
+    assert seen_percents[0] < 1.0  # proves it isn't just stuck at the final value
+
+
+def test_execute_scan_progress_position_ignores_other_chromosomes(engine):
+    """Regression test for a bug where a byte-based progress tick landing
+    on an unrelated chromosome's row reported that row's raw position, which
+    the GUI then clamped into the target window's display bounds, causing
+    the displayed position to flicker between the window's two edges
+    instead of climbing. Built with the target chromosome's rows sandwiched
+    between large blocks of other chromosomes, so PROGRESS_INTERVAL ticks
+    land both before and after the target chromosome is ever reached; the
+    reported position must never leak a chr1/chr3 row's raw value."""
+    chr1_rows = [f"1\t{5_000_000 + i}\trs1_{i}\tT\tC\t0.01" for i in range(700)]
+    chr2_rows = [f"2\t{27_500_000 + i * 100}\trs2_{i}\tT\tC\t0.01" for i in range(50)]
+    chr3_rows = [f"3\t{9_000_000 + i}\trs3_{i}\tT\tC\t0.01" for i in range(700)]
+    content = (
+        "chr_name\tchr_position\trsID\teffect_allele\tother_allele\teffect_weight\n"
+        + "\n".join(chr1_rows + chr2_rows + chr3_rows) + "\n"
+    )
+    big_file = make_gz(content)
+
+    seen_positions = []
+
+    def on_progress(current_pos, percent_complete, variants_found):
+        seen_positions.append(current_pos)
+
+    start_window = 27_500_000
+    engine.execute_scan(
+        file_object=big_file,
+        chr_number=2,
+        target_pos=27_500_000,
+        start_window=start_window,
+        end_window=27_505_000,
+        target_rsid="rs2_0",
+        progress_callback=on_progress,
+    )
+
+    assert len(seen_positions) >= 2
+    for pos in seen_positions:
+        assert not (5_000_000 <= pos < 5_000_700), f"leaked a chr1 position: {pos}"
+        assert not (9_000_000 <= pos < 9_000_700), f"leaked a chr3 position: {pos}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # TC-09: Unrecognised file (non-gzip) → execute_scan raises an exception
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -378,6 +481,40 @@ def test_http_429_does_not_write_cache(engine, mock_429, tmp_path, monkeypatch):
 
     cache_file = engine._cache_path("rs7903146", "EUR", "GRCh38")
     assert not os.path.exists(cache_file)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# build_output_header unit tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_build_output_header_reports_disabled_population_when_falsy():
+    """A None/empty population (LD proxies not used for this scan) must
+    render as 'Disabled' rather than leaking a stale UI value like
+    'Choose...' into the CSV header."""
+    header = appV3.build_output_header(
+        metadata={},
+        target_rsid="rs1260326",
+        population=None,
+        genome_build="GRCh38",
+        r2_threshold=None,
+        dprime_threshold=None,
+    )
+    assert "# LD Population: Disabled" in header
+    assert "Choose..." not in header
+
+
+def test_build_output_header_reports_real_population_when_ld_used():
+    """A real population code must be reported as-is when LD proxies were
+    actually used, as a contrasting control case for the test above."""
+    header = appV3.build_output_header(
+        metadata={},
+        target_rsid="rs1260326",
+        population="EUR",
+        genome_build="GRCh38",
+        r2_threshold=0.7,
+        dprime_threshold=None,
+    )
+    assert "# LD Population: EUR" in header
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1028,6 +1165,81 @@ def test_ld_window_size_choice_survives_toggling_ld_proxies_off(gui_state):
     gui.render_step5_config()
     assert gui_state["window_size"] == 0
     assert gui_state["ld_window_size"] == 25_000  # preference remembered
+
+
+# ── active_ld_thresholds() only applies the metric(s) actually selected ────
+
+def test_active_ld_thresholds_both_none_when_ld_proxies_off(gui_state):
+    """With LD proxies declined, neither threshold should ever be applied,
+    regardless of leftover slider values from a prior LD-enabled session."""
+    gui_state["want_ld_proxies"] = "No, scan target position only"
+    gui_state["r2_filter"] = 0.7
+    gui_state["dprime_filter"] = 0.8
+
+    assert gui.active_ld_thresholds() == (None, None)
+
+
+def test_active_ld_thresholds_r2_only_ignores_stale_dprime_value(gui_state):
+    """Selecting 'R² only' must not silently also apply the D' slider's
+    stored value; only r2_threshold should be non-None."""
+    gui_state["want_ld_proxies"] = "Yes, also search LD proxies (requires a free token)"
+    gui_state["ld_metric"] = "R² only"
+    gui_state["r2_filter"] = 0.6
+    gui_state["dprime_filter"] = 0.9
+
+    assert gui.active_ld_thresholds() == (0.6, None)
+
+
+def test_active_ld_thresholds_dprime_only_ignores_stale_r2_value(gui_state):
+    """Selecting 'D' only' must not silently also apply the R² slider's
+    stored value; only dprime_threshold should be non-None."""
+    gui_state["want_ld_proxies"] = "Yes, also search LD proxies (requires a free token)"
+    gui_state["ld_metric"] = "D′ only"
+    gui_state["r2_filter"] = 0.6
+    gui_state["dprime_filter"] = 0.9
+
+    assert gui.active_ld_thresholds() == (None, 0.9)
+
+
+def test_active_ld_thresholds_both_when_both_required(gui_state):
+    """Selecting 'Both must pass' must apply both thresholds together."""
+    gui_state["want_ld_proxies"] = "Yes, also search LD proxies (requires a free token)"
+    gui_state["ld_metric"] = "R² and D′ (both must pass)"
+    gui_state["r2_filter"] = 0.6
+    gui_state["dprime_filter"] = 0.9
+
+    assert gui.active_ld_thresholds() == (0.6, 0.9)
+
+
+# ── run_scan() precomputes and caches export_df/csv_bytes ──────────────────
+
+def test_run_scan_caches_export_df_and_csv_bytes(gui_state):
+    """run_scan() must precompute the filtered export DataFrame and the
+    downloadable CSV bytes once, and cache both in scan_results, so
+    render_results() never has to redo that work on a later rerun (and so
+    the progress bar's reserved 90-100% segment reflects real work)."""
+    content = textwrap.dedent("""\
+        # PGS Catalog Score File
+        chr_name\tchr_position\trsID\teffect_allele\tother_allele\teffect_weight
+        10\t112998590\trs7903146\tT\tC\t0.42
+        """)
+    gui_state["pgs_file_bytes"] = _gz_bytes(content)
+    gui_state["chromosome"] = 10
+    gui_state["target_pos"] = 112998590
+    gui_state["target_rsid"] = "rs7903146"
+    gui_state["window_size"] = 0
+    gui_state["want_ld_proxies"] = "No, scan target position only"
+    gui_state["genome_build"] = "GRCh38"
+    gui_state["proxies_only"] = True
+
+    gui.run_scan()
+
+    results = gui_state["scan_results"]
+    assert results["exact_match"] is True
+    assert "export_df" in results and "csv_bytes" in results
+    assert isinstance(results["csv_bytes"], bytes)
+    assert b"rs7903146" in results["csv_bytes"]
+    assert b"LD Population: Disabled" in results["csv_bytes"]
 
 
 # ═════════════════════════════════════════════════════════════════════════
