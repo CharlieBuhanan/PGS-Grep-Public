@@ -5,10 +5,10 @@ pytest suite for appV3.PGSScanEngine and resolve_column_map.
 All file I/O uses in-memory gzip streams; all HTTP calls are mocked.
 
 Install Dependencies:
-    pip install pytest pytest-mock requests
+    pip install pytest
 
 Run Tests:
-    python -m pytest test_pgs_explorer.py -v
+    python -m pytest StreamlitTestSuite.py -v
 """
 
 import gzip
