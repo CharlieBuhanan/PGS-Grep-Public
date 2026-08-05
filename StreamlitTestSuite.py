@@ -15,6 +15,7 @@ import gzip
 import io
 import os
 import textwrap
+import time
 
 import pandas as pd
 import pytest
@@ -672,18 +673,22 @@ def _fake_columns(spec, **kwargs):
 
 
 @pytest.fixture()
-def gui_state():
+def gui_state(tmp_path, monkeypatch):
     """
     Fresh, isolated session_state + a controllable `st` mock for each
     StreamlitGUI test. Resets call history so assertions on st.error /
     st.warning / st.button etc. only see calls made by the test itself,
     and gives every test a clean wizard state via init_session_state().
+
+    UPLOAD_TMP_DIR is redirected into the test's tmp_path so uploads written
+    to disk stay hermetic and never litter the real system temp directory.
     """
     gui.st.reset_mock()
     gui.st.session_state = {}
     gui.st.columns = MagicMock(side_effect=_fake_columns)
     gui.st.button = MagicMock(return_value=False)
     gui.st.file_uploader = MagicMock(return_value=None)
+    monkeypatch.setattr(gui, "UPLOAD_TMP_DIR", str(tmp_path / "uploads"))
     gui.init_session_state()
     return gui.st.session_state
 
@@ -767,7 +772,7 @@ def test_oversized_upload_shows_error_and_blocks_next(gui_state):
 
     gui.render_step2_upload()
 
-    assert gui_state["pgs_file_bytes"] is None
+    assert gui_state["pgs_file_path"] is None
     error_text = " ".join(str(c.args[0]) for c in gui.st.error.call_args_list)
     assert f"exceeds the {gui.max_pgs_file_size_mb()} MB limit" in error_text
     assert _button_call("Next").kwargs["disabled"] is True
@@ -786,8 +791,122 @@ def test_file_exactly_at_size_limit_is_accepted(gui_state):
 
     gui.render_step2_upload()
 
-    assert gui_state["pgs_file_bytes"] == raw
+    # The upload is now held on disk rather than in session_state; the bytes
+    # must round-trip through that file unchanged.
+    stored = gui_state["pgs_file_path"]
+    assert stored is not None
+    with open(stored, "rb") as fh:
+        assert fh.read() == raw
     assert gui.st.error.call_args_list == []
+
+
+# ── Uploads are held on disk, not in session_state ─────────────────────────
+
+def test_upload_is_not_retained_in_session_state(gui_state):
+    """The uploaded bytes must not be parked in session_state: that is
+    per-user and lives for the whole session, so a large upload there
+    multiplies with concurrency. Only a path may be kept."""
+    raw = make_harmonized_gz()
+    gui.st.file_uploader = MagicMock(
+        return_value=FakeUploadedFile(raw, "PGS000014_hmPOS_GRCh38.txt.gz")
+    )
+
+    gui.render_step2_upload()
+
+    assert gui_state["pgs_file_path"] is not None
+    assert not any(
+        isinstance(v, (bytes, bytearray)) and len(v) >= len(raw)
+        for v in gui_state.values()
+    ), "no session_state entry may hold the uploaded bytes"
+
+
+def test_replacing_upload_deletes_the_previous_file(gui_state):
+    """Uploading a second file must delete the first one's temp file, so a
+    session that re-uploads repeatedly leaves only one file on disk."""
+    gui.st.file_uploader = MagicMock(
+        return_value=FakeUploadedFile(
+            make_harmonized_gz(), "PGS000014_hmPOS_GRCh38.txt.gz")
+    )
+    gui.render_step2_upload()
+    first_path = gui_state["pgs_file_path"]
+    assert os.path.exists(first_path)
+
+    # A different file (different name -> different signature)
+    gui.st.file_uploader = MagicMock(
+        return_value=FakeUploadedFile(
+            make_harmonized_gz(), "PGS000018_hmPOS_GRCh38.txt.gz")
+    )
+    gui.render_step2_upload()
+    second_path = gui_state["pgs_file_path"]
+
+    assert second_path != first_path
+    assert not os.path.exists(first_path), "previous upload should be deleted"
+    assert os.path.exists(second_path)
+
+
+def test_stored_upload_path_returns_none_when_file_is_gone(gui_state, tmp_path):
+    """If the stored file has been swept away, stored_upload_path() must
+    report None rather than handing back a dead path."""
+    ghost = tmp_path / "already-deleted.txt.gz"
+    gui_state["pgs_file_path"] = str(ghost)
+    assert gui.stored_upload_path() is None
+
+
+def test_run_scan_errors_clearly_when_upload_expired(gui_state, tmp_path):
+    """A session whose upload was swept must get an actionable message telling
+    it to re-upload, not a crash or a silently empty result."""
+    gui_state["pgs_file_path"] = str(tmp_path / "gone.txt.gz")
+    gui_state["chromosome"] = 10
+    gui_state["target_pos"] = 112998590
+    gui_state["target_rsid"] = "rs7903146"
+    gui_state["window_size"] = 0
+    gui_state["want_ld_proxies"] = "No, scan target position only"
+
+    gui.run_scan()
+
+    assert gui_state["scan_results"] is None
+    error_text = " ".join(str(c.args[0]) for c in gui.st.error.call_args_list)
+    assert "no longer available" in error_text
+    assert "upload the score file again" in error_text
+
+
+def test_sweep_removes_only_stale_uploads(gui_state, tmp_path):
+    """The startup sweep must reclaim orphaned files past the age cutoff while
+    leaving a freshly-touched file (one a live session may still need) alone."""
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    fresh = upload_dir / "fresh.txt.gz"
+    stale = upload_dir / "stale.txt.gz"
+    fresh.write_bytes(b"fresh")
+    stale.write_bytes(b"stale")
+
+    # Backdate the stale file past the cutoff
+    old = time.time() - gui.UPLOAD_MAX_AGE_SECONDS - 60
+    os.utime(stale, (old, old))
+
+    gui.sweep_stale_uploads()
+
+    assert fresh.exists(), "a recently-used upload must survive the sweep"
+    assert not stale.exists(), "an orphaned upload past the cutoff must be removed"
+
+
+def test_sweep_is_safe_when_upload_dir_missing(gui_state):
+    """Sweeping before any upload has ever been stored must be a no-op, not
+    an error on a directory that does not exist yet."""
+    gui.sweep_stale_uploads()  # UPLOAD_TMP_DIR was never created
+
+
+def test_stored_upload_path_refreshes_mtime(gui_state, tmp_path):
+    """Accessing the stored upload marks it as in use, which is what stops the
+    sweep from reclaiming a file belonging to a slow-but-live session."""
+    stored = tmp_path / "in-use.txt.gz"
+    stored.write_bytes(b"data")
+    old = time.time() - gui.UPLOAD_MAX_AGE_SECONDS - 60
+    os.utime(stored, (old, old))
+    gui_state["pgs_file_path"] = str(stored)
+
+    assert gui.stored_upload_path() == str(stored)
+    assert stored.stat().st_mtime > old, "access should refresh the timestamp"
 
 
 # ── Session state survives moving back and forth between wizard steps ──────
@@ -1215,7 +1334,7 @@ def test_active_ld_thresholds_both_when_both_required(gui_state):
 
 # ── run_scan() precomputes and caches export_df/csv_bytes ──────────────────
 
-def test_run_scan_caches_export_df_and_csv_bytes(gui_state):
+def test_run_scan_caches_export_df_and_csv_bytes(gui_state, tmp_path):
     """run_scan() must precompute the filtered export DataFrame and the
     downloadable CSV bytes once, and cache both in scan_results, so
     render_results() never has to redo that work on a later rerun (and so
@@ -1225,7 +1344,9 @@ def test_run_scan_caches_export_df_and_csv_bytes(gui_state):
         chr_name\tchr_position\trsID\teffect_allele\tother_allele\teffect_weight
         10\t112998590\trs7903146\tT\tC\t0.42
         """)
-    gui_state["pgs_file_bytes"] = _gz_bytes(content)
+    stored = tmp_path / "upload.txt.gz"
+    stored.write_bytes(_gz_bytes(content))
+    gui_state["pgs_file_path"] = str(stored)
     gui_state["chromosome"] = 10
     gui_state["target_pos"] = 112998590
     gui_state["target_rsid"] = "rs7903146"
@@ -1376,3 +1497,209 @@ def test_missing_rsid_column_falls_back_to_ld_map_and_target_rsid(engine):
     row_proxy = df[df["chr_position"] == 113005746].iloc[0]
     assert row_target["RS_ID"] == "rs7903146"
     assert row_proxy["RS_ID"] == "rs4506565"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Missing-value handling across the temp-CSV streaming round-trip
+#
+# execute_scan streams matched rows to a temp CSV and reads them back with
+# pd.read_csv instead of building an in-memory list of dicts. That round-trip
+# must be text-preserving: pandas' default NA detection would otherwise
+# reinterpret cell text on the way back in, which no in-memory list ever did.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Sentinels that safe_get treats as "missing" and replaces with "N/A".
+MISSING_SENTINEL_TSV = textwrap.dedent("""\
+    # PGS Catalog Score File
+    chr_name\tchr_position\trsID\teffect_allele\tother_allele\teffect_weight
+    10\t112998590\t.\tT\tC\t0.42
+    10\t112998591\tNA\tnan\tNaN\t0.31
+    10\t112998592\tNull\t\tA\t
+    10\t112998593\trs123\tA\tG\t0.18
+""")
+
+
+def test_missing_values_become_na_sentinel_not_nan(engine):
+    """Regression test: every MISSING_VALUE_TOKENS spelling ('.', 'NA', 'nan',
+    'NaN', 'Null', empty) must surface as the literal string "N/A", never as
+    a real NaN.
+
+    execute_scan writes "N/A" into the temp CSV, and "N/A" is one of pandas'
+    default na_values -- so reading the file back without keep_default_na=False
+    silently converts those cells to NaN and blanks them in the export. Passing
+    dtype=str does NOT prevent this.
+    """
+    _, _, df = engine.execute_scan(
+        file_object=make_gz(MISSING_SENTINEL_TSV),
+        chr_number=10,
+        target_pos=112998593,          # a row with a real rsID, so the
+        start_window=112990000,        # "N/A" -> target_rsid fallback never
+        end_window=113050000,          # masks the sentinels under test
+        target_rsid="rs123",
+    )
+
+    assert not df.isna().any().any(), "no cell may be NaN; missing means 'N/A'"
+
+    by_pos = df.set_index("chr_position")
+    assert by_pos.loc[112998590, "RS_ID"] == "N/A"          # '.'
+    assert by_pos.loc[112998591, "RS_ID"] == "N/A"          # 'NA'
+    assert by_pos.loc[112998591, "effect_allele"] == "N/A"  # 'nan'
+    assert by_pos.loc[112998591, "other_allele"] == "N/A"   # 'NaN'
+    assert by_pos.loc[112998592, "RS_ID"] == "N/A"          # 'Null'
+    assert by_pos.loc[112998592, "effect_allele"] == "N/A"  # empty field
+
+
+def test_missing_effect_weight_defaults_to_zero_string(engine):
+    """A blank effect_weight uses safe_get's "0.0" default, and survives the
+    CSV round-trip as the string "0.0" rather than a float or NaN."""
+    _, _, df = engine.execute_scan(
+        file_object=make_gz(MISSING_SENTINEL_TSV),
+        chr_number=10,
+        target_pos=112998593,
+        start_window=112990000,
+        end_window=113050000,
+        target_rsid="rs123",
+    )
+
+    weight = df.set_index("chr_position").loc[112998592, "effect_weight"]
+    assert weight == "0.0"
+    assert isinstance(weight, str)
+
+
+def test_null_spellings_are_matched_case_insensitively(engine):
+    """MISSING_VALUE_TOKENS is matched case-insensitively, so 'NULL', 'null',
+    'None', 'n/a' and '<NA>' all count as missing, not as literal allele text."""
+    content = textwrap.dedent("""\
+        # PGS Catalog Score File
+        chr_name\tchr_position\trsID\teffect_allele\tother_allele\teffect_weight
+        10\t112998590\tNULL\tNone\tn/a\t0.42
+        10\t112998591\tnull\t<NA>\t#N/A\t0.31
+    """)
+
+    _, _, df = engine.execute_scan(
+        file_object=make_gz(content),
+        chr_number=10,
+        target_pos=999,            # no exact-match row, so the target_rsid
+        start_window=112990000,    # fallback never masks a sentinel
+        end_window=113050000,
+        target_rsid="rsTARGET",
+    )
+
+    assert not df.isna().any().any()
+
+    by_pos = df.set_index("chr_position")
+    for pos in (112998590, 112998591):
+        for col in ("RS_ID", "effect_allele", "other_allele"):
+            assert by_pos.loc[pos, col] == "N/A", f"{col} at {pos} should be missing"
+
+
+def test_deletion_allele_dash_is_not_treated_as_missing(engine):
+    """'-' is a legitimate deletion allele in indel rows, so it must survive as
+    literal text rather than being blanked to the missing sentinel."""
+    content = textwrap.dedent("""\
+        # PGS Catalog Score File
+        chr_name\tchr_position\trsID\teffect_allele\tother_allele\teffect_weight
+        10\t112998590\trs123\t-\tAT\t0.42
+    """)
+
+    _, _, df = engine.execute_scan(
+        file_object=make_gz(content),
+        chr_number=10,
+        target_pos=999,
+        start_window=112990000,
+        end_window=113050000,
+        target_rsid="rsTARGET",
+    )
+
+    row = df.iloc[0]
+    assert row["effect_allele"] == "-"
+    assert row["other_allele"] == "AT"
+
+
+def test_float_artifact_text_survives_streaming_roundtrip(engine):
+    """Regression test: text that pandas' default NA detection would swallow but
+    safe_get deliberately does not ('#NA', '-NaN', '1.#IND') must come back
+    byte-identical from the temp-CSV round-trip.
+
+    These are Excel/C float artifacts, not recognised missing-value spellings.
+    They keep the keep_default_na=False guard meaningful even though
+    MISSING_VALUE_TOKENS now covers the common null spellings itself.
+    """
+    content = textwrap.dedent("""\
+        # PGS Catalog Score File
+        chr_name\tchr_position\trsID\teffect_allele\tother_allele\teffect_weight
+        10\t112998590\t#NA\t-NaN\t1.#IND\t0.42
+    """)
+
+    _, _, df = engine.execute_scan(
+        file_object=make_gz(content),
+        chr_number=10,
+        target_pos=999,
+        start_window=112990000,
+        end_window=113050000,
+        target_rsid="rsTARGET",
+    )
+
+    assert not df.isna().any().any()
+
+    row = df.iloc[0]
+    assert row["RS_ID"] == "#NA"
+    assert row["effect_allele"] == "-NaN"
+    assert row["other_allele"] == "1.#IND"
+
+
+def test_csv_export_writes_na_sentinel_not_blank_cells(engine):
+    """End-to-end: the CSV the user downloads must contain literal "N/A" for
+    missing fields, not empty cells (what NaN would serialise to)."""
+    _, _, df = engine.execute_scan(
+        file_object=make_gz(MISSING_SENTINEL_TSV),
+        chr_number=10,
+        target_pos=112998593,
+        start_window=112990000,
+        end_window=113050000,
+        target_rsid="rs123",
+    )
+
+    exported = df.to_csv(index=False)
+    assert "N/A" in exported
+    assert ",," not in exported, "an empty cell means a sentinel was lost to NaN"
+
+
+def test_missing_values_preserve_column_dtypes(engine):
+    """Rows containing missing values must not shift column dtypes: positions
+    stay integer, every other column stays text."""
+    _, _, df = engine.execute_scan(
+        file_object=make_gz(MISSING_SENTINEL_TSV),
+        chr_number=10,
+        target_pos=112998593,
+        start_window=112990000,
+        end_window=113050000,
+        target_rsid="rs123",
+    )
+
+    assert pd.api.types.is_integer_dtype(df["chr_position"])
+    for col in appV3.OUTPUT_COLS:
+        if col != "chr_position":
+            assert pd.api.types.is_string_dtype(df[col]), f"{col} should stay text"
+
+
+def test_proxy_status_with_commas_survives_csv_roundtrip(engine):
+    """Match_Status for an LD proxy embeds commas (r^2 and D' values). The temp
+    CSV must quote and restore it intact rather than splitting it into extra
+    columns."""
+    engine.ld_map = engine._parse_ld_text(
+        LDLINK_RESPONSE, r2_threshold=0.0, dprime_threshold=0.0
+    )
+
+    _, _, df = engine.execute_scan(
+        file_object=make_gz(PGS_TSV),
+        chr_number=10,
+        target_pos=999,                # no exact match, so 113005746 stays a proxy
+        start_window=112990000,
+        end_window=113050000,
+        target_rsid="rs7903146",
+    )
+
+    assert list(df.columns) == appV3.OUTPUT_COLS
+    status = df.set_index("chr_position").loc[113005746, "Match_Status"]
+    assert status == "LD PROXY (rs4506565, r^2=0.970, D'=0.990)"

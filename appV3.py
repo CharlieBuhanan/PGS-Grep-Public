@@ -10,10 +10,11 @@
 # TODO: Make this more efficient. Better clear cache button
 # Future: option to see all LD proxies (view cache file basically)
 
+import csv
 import gzip
-import io
 import os
 import struct
+import tempfile
 import uuid
 from datetime import date
 from typing import Final
@@ -68,6 +69,22 @@ def _gzip_uncompressed_size(file_object) -> int | None:
     except Exception:
         return None
 
+
+# Spellings that harmonized PGS files use to mean "no value here". Matched
+# case-insensitively, so NULL/Null/null are all caught by the one entry.
+# Deliberately excludes "-": that is a legitimate deletion allele in indel
+# rows, not a missing value, and blanking it would corrupt real data.
+MISSING_VALUE_TOKENS: Final[frozenset[str]] = frozenset({
+    "",
+    ".",
+    "na",
+    "n/a",
+    "nan",
+    "null",
+    "none",
+    "<na>",
+    "#n/a",
+})
 
 # Canonical output columns (always emitted in this order)
 OUTPUT_COLS: Final[list[str]] = [
@@ -149,13 +166,13 @@ def extract_pgs_metadata(file_object) -> dict:
         opener = gzip.open(file_object, "rt", encoding="utf-8")
     else:
         file_object.seek(0)
-        opener = gzip.open(io.BytesIO(file_object.read()), "rt", encoding="utf-8")
+        opener = gzip.open(file_object, "rt", encoding="utf-8")
 
     with opener as f:
         for raw_line in f:
             line = raw_line.rstrip("\n")
             if not line.startswith("#"):
-                break 
+                break
             
             content = line.lstrip("#").strip()
             if "=" in content:
@@ -448,7 +465,7 @@ class PGSScanEngine:
 
         exact_match:      bool = False
         proxy_matches:    list = []
-        rows_processed:   list = []
+        rows_count:       int  = 0
         lines_read:       int  = 0
         bytes_read_approx: int = 0
         target_chr_str = normalize_chr(chr_number)
@@ -473,112 +490,142 @@ class PGSScanEngine:
             opener = gzip.open(file_object, "rt", encoding="utf-8")
         else:
             file_object.seek(0)
-            opener = gzip.open(io.BytesIO(file_object.read()), "rt", encoding="utf-8")
+            opener = gzip.open(file_object, "rt", encoding="utf-8")
 
         col_map: dict | None = None
 
-        with opener as f:
-            for raw_line in f:
-                bytes_read_approx += len(raw_line)
-                line = raw_line.rstrip("\n")
+        # Matched rows are streamed to a temp CSV instead of an in-memory list,
+        # so peak memory scales with a write buffer rather than window width.
+        tmp_csv = tempfile.NamedTemporaryFile(
+            mode="w", newline="", suffix=".csv", delete=False, encoding="utf-8"
+        )
+        try:
+            writer = csv.DictWriter(tmp_csv, fieldnames=OUTPUT_COLS)
+            writer.writeheader()
 
-                if line.startswith("#") or not line.strip():
-                    continue
+            with opener as f:
+                for raw_line in f:
+                    bytes_read_approx += len(raw_line)
+                    line = raw_line.rstrip("\n")
 
-                columns = line.split("\t") if "\t" in line else line.split()
-
-                if col_map is None:
-                    first = columns[0].lower().strip()
-                    if first in ("rsid", "chr_name", "hm_chr", "#chr_name"):
-                        try:
-                            col_map = resolve_column_map(columns)
-                        except ValueError as e:
-                            st.error(f"❌ Header parse error: {e}")
-                            return False, [], pd.DataFrame()
-                        continue
-                    else:
+                    if line.startswith("#") or not line.strip():
                         continue
 
-                lines_read += 1
+                    columns = line.split("\t") if "\t" in line else line.split()
 
-                def safe_get(idx, default="N/A"):
-                    if idx is None or idx >= len(columns):
-                        return default
-                    v = columns[idx].strip()
-                    return v if v not in ("", ".", "NA", "nan", "NaN", "Null") else default
+                    if col_map is None:
+                        first = columns[0].lower().strip()
+                        if first in ("rsid", "chr_name", "hm_chr", "#chr_name"):
+                            try:
+                                col_map = resolve_column_map(columns)
+                            except ValueError as e:
+                                st.error(f"❌ Header parse error: {e}")
+                                return False, [], pd.DataFrame()
+                            continue
+                        else:
+                            continue
 
-                c_name = normalize_chr(safe_get(col_map["chr"], ""))
-                c_pos  = safe_get(col_map["pos"], "")
+                    lines_read += 1
 
-                try:
-                    current_pos = int(c_pos)
-                except ValueError:
-                    continue
+                    def safe_get(idx, default="N/A"):
+                        if idx is None or idx >= len(columns):
+                            return default
+                        v = columns[idx].strip()
+                        return default if v.lower() in MISSING_VALUE_TOKENS else v
 
-                if c_name == target_chr_str:
-                    last_target_pos = current_pos
+                    c_name = normalize_chr(safe_get(col_map["chr"], ""))
+                    c_pos  = safe_get(col_map["pos"], "")
 
-                if progress_callback and total_size and lines_read % PROGRESS_INTERVAL == 0:
-                    pct = max(0.0, min(1.0, bytes_read_approx / total_size))
-                    progress_callback(last_target_pos, pct, len(rows_processed))
+                    try:
+                        current_pos = int(c_pos)
+                    except ValueError:
+                        continue
 
-                if c_name != target_chr_str:
-                    continue
+                    if c_name == target_chr_str:
+                        last_target_pos = current_pos
 
-                if progress_callback and not total_size and lines_read % PROGRESS_INTERVAL == 0:
-                    # Fallback when the file's decompressed size isn't available:
-                    # approximate progress by position within the search window.
-                    window_span = end_window - start_window
-                    if window_span > 0:
-                        pct = (current_pos - start_window) / window_span
+                    if progress_callback and total_size and lines_read % PROGRESS_INTERVAL == 0:
+                        pct = max(0.0, min(1.0, bytes_read_approx / total_size))
+                        progress_callback(last_target_pos, pct, rows_count)
+
+                    if c_name != target_chr_str:
+                        continue
+
+                    if progress_callback and not total_size and lines_read % PROGRESS_INTERVAL == 0:
+                        # Fallback when the file's decompressed size isn't available:
+                        # approximate progress by position within the search window.
+                        window_span = end_window - start_window
+                        if window_span > 0:
+                            pct = (current_pos - start_window) / window_span
+                        else:
+                            pct = 1.0
+                        pct = max(0.0, min(1.0, pct))
+                        progress_callback(current_pos, pct, rows_count)
+
+                    if not (start_window <= current_pos <= end_window):
+                        continue
+
+                    rs_id = safe_get(col_map.get("rsid"))
+                    if rs_id == "N/A" and current_pos in ld_rsid_by_pos:
+                        rs_id = ld_rsid_by_pos[current_pos]
+
+                    if rs_id == "N/A" and current_pos == target_pos:
+                        rs_id = target_rsid
+
+                    eff_al = safe_get(col_map.get("eff_al"))
+                    oth_al = safe_get(col_map.get("oth_al"))
+                    weight = safe_get(col_map.get("weight"), "0.0")
+
+                    if current_pos == target_pos:
+                        status_flag = "EXACT TARGET MATCH"
+                        exact_match = True
+                    elif current_pos in self.ld_map:
+                        p = self.ld_map[current_pos]
+                        # Include D' in the label when it was fetched
+                        if p.get("dprime") is not None:
+                            status_flag = (
+                                f"LD PROXY ({p['rsid']}, r^2={p['r2']:.3f}, D'={p['dprime']:.3f})"
+                            )
+                        else:
+                            status_flag = f"LD PROXY ({p['rsid']}, r^2={p['r2']:.3f})"
+                        proxy_matches.append((current_pos, p["rsid"], p["r2"], weight))
                     else:
-                        pct = 1.0
-                    pct = max(0.0, min(1.0, pct))
-                    progress_callback(current_pos, pct, len(rows_processed))
+                        status_flag = "Unlinked Region Variant"
 
-                if not (start_window <= current_pos <= end_window):
-                    continue
+                    writer.writerow({
+                        "chr_name":      c_name,
+                        "chr_position":  current_pos,
+                        "RS_ID":         rs_id,
+                        "effect_allele": eff_al,
+                        "other_allele":  oth_al,
+                        "effect_weight": weight,
+                        "Match_Status":  status_flag,
+                    })
+                    rows_count += 1
 
-                rs_id = safe_get(col_map.get("rsid"))
-                if rs_id == "N/A" and current_pos in ld_rsid_by_pos:
-                    rs_id = ld_rsid_by_pos[current_pos]
+            # Final callback so the GUI always reaches 100 %
+            if progress_callback:
+                progress_callback(end_window, 1.0, rows_count)
 
-                if rs_id == "N/A" and current_pos == target_pos:
-                    rs_id = target_rsid
+            tmp_csv.close()
+            if rows_count:
+                # Force every column but chr_position to stay text, matching the
+                # dtypes the old list-of-dicts -> DataFrame path produced (e.g.
+                # effect_weight as strings, not auto-inferred floats).
+                # keep_default_na=False is required: safe_get writes the literal
+                # sentinel "N/A" for missing fields, which read_csv would
+                # otherwise silently turn into NaN and blank out in the export.
+                df = pd.read_csv(
+                    tmp_csv.name,
+                    dtype={col: str for col in OUTPUT_COLS if col != "chr_position"},
+                    keep_default_na=False,
+                )
+            else:
+                df = pd.DataFrame(columns=OUTPUT_COLS)
+        finally:
+            if not tmp_csv.closed:
+                tmp_csv.close()
+            if os.path.exists(tmp_csv.name):
+                os.remove(tmp_csv.name)
 
-                eff_al = safe_get(col_map.get("eff_al"))
-                oth_al = safe_get(col_map.get("oth_al"))
-                weight = safe_get(col_map.get("weight"), "0.0")
-
-                if current_pos == target_pos:
-                    status_flag = "EXACT TARGET MATCH"
-                    exact_match = True
-                elif current_pos in self.ld_map:
-                    p = self.ld_map[current_pos]
-                    # Include D' in the label when it was fetched
-                    if p.get("dprime") is not None:
-                        status_flag = (
-                            f"LD PROXY ({p['rsid']}, r^2={p['r2']:.3f}, D'={p['dprime']:.3f})"
-                        )
-                    else:
-                        status_flag = f"LD PROXY ({p['rsid']}, r^2={p['r2']:.3f})"
-                    proxy_matches.append((current_pos, p["rsid"], p["r2"], weight))
-                else:
-                    status_flag = "Unlinked Region Variant"
-
-                rows_processed.append({
-                    "chr_name":      c_name,
-                    "chr_position":  current_pos,
-                    "RS_ID":         rs_id,
-                    "effect_allele": eff_al,
-                    "other_allele":  oth_al,
-                    "effect_weight": weight,
-                    "Match_Status":  status_flag,
-                })
-
-        # Final callback so the GUI always reaches 100 %
-        if progress_callback:
-            progress_callback(end_window, 1.0, len(rows_processed))
-
-        df = pd.DataFrame(rows_processed, columns=OUTPUT_COLS) if rows_processed else pd.DataFrame(columns=OUTPUT_COLS)
         return exact_match, proxy_matches, df
