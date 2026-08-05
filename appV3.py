@@ -11,7 +11,6 @@
 # Future: option to see all LD proxies (view cache file basically)
 
 import gzip
-import io
 import os
 import struct
 import uuid
@@ -149,13 +148,13 @@ def extract_pgs_metadata(file_object) -> dict:
         opener = gzip.open(file_object, "rt", encoding="utf-8")
     else:
         file_object.seek(0)
-        opener = gzip.open(io.BytesIO(file_object.read()), "rt", encoding="utf-8")
+        opener = gzip.open(file_object, "rt", encoding="utf-8")
 
     with opener as f:
         for raw_line in f:
             line = raw_line.rstrip("\n")
             if not line.startswith("#"):
-                break 
+                break
             
             content = line.lstrip("#").strip()
             if "=" in content:
@@ -473,7 +472,7 @@ class PGSScanEngine:
             opener = gzip.open(file_object, "rt", encoding="utf-8")
         else:
             file_object.seek(0)
-            opener = gzip.open(io.BytesIO(file_object.read()), "rt", encoding="utf-8")
+            opener = gzip.open(file_object, "rt", encoding="utf-8")
 
         col_map: dict | None = None
 
