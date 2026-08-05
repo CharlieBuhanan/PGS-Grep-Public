@@ -14,6 +14,10 @@ venv/
 LD_API_Results/
 error_debug_log*.html
 
+# Claude
+claude.md
+.claude/
+
 # OS
 # .vscode/settings.json is intentionally tracked (shared cSpell dictionary).
 .DS_Store
