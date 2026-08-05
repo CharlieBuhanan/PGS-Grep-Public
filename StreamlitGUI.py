@@ -478,7 +478,7 @@ is used.""")
         )
 
 
-DEFAULT_MAX_PGS_FILE_SIZE_MB = 100
+DEFAULT_MAX_PGS_FILE_SIZE_MB = 200
 
 
 def max_pgs_file_size_mb() -> int:

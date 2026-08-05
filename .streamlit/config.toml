@@ -61,4 +61,4 @@ enableStaticServing = true
 # hosting. A local run can lift it without editing this file:
 #   streamlit run StreamlitGUI.py --server.maxUploadSize=1000
 # The in-app check reads this value back at runtime, so both layers stay in step.
-maxUploadSize = 100
+maxUploadSize = 200

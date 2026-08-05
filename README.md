@@ -41,7 +41,7 @@ This opens a guided wizard in your browser that walks through uploading the scor
 
 ### Raising the upload limit
 
-Uploads are capped at 100 MB by `server.maxUploadSize` in `.streamlit/config.toml`. The cap is temporary, sized for the 1 GB of RAM a free Streamlit Community Cloud app gets, and applies to local runs too since that config file ships with the repo.
+Uploads are capped at 200 MB by `server.maxUploadSize` in `.streamlit/config.toml`. The cap is temporary, sized for the 1 GB of RAM a free Streamlit Community Cloud app gets, and applies to local runs too since that config file ships with the repo.
 
 To raise it for a local run, pass the option on the command line — no need to edit the file:
 
