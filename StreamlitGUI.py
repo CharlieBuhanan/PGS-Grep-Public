@@ -35,9 +35,11 @@ Architecture notes for developers:
 """
 
 import hashlib
-import io
 import os
 import re
+import tempfile
+import time
+import uuid
 from datetime import date
 
 import streamlit as st  # type: ignore
@@ -164,6 +166,79 @@ def reset_downstream_state() -> None:
     st.session_state["preview_metadata"] = None
 
 
+# Uploaded score files live on ephemeral disk rather than in session_state.
+# Session state is per-user and persists for the whole session, so keeping a
+# multi-hundred-MB upload there multiplies with concurrency against the 1 GB a
+# free Streamlit Community Cloud app gets; disk is the cheaper resource.
+UPLOAD_TMP_DIR = os.path.join(tempfile.gettempdir(), "pgs_grep_uploads")
+
+# How long an untouched upload survives before the startup sweep reclaims it.
+UPLOAD_MAX_AGE_SECONDS = 6 * 60 * 60
+
+
+def sweep_stale_uploads() -> None:
+    """
+    Delete orphaned uploads left behind by sessions that ended.
+
+    Streamlit exposes no session-end hook, so a closed browser tab strands its
+    file. Sweeping on startup bounds how much disk those can occupy. Only files
+    untouched for UPLOAD_MAX_AGE_SECONDS are removed, and stored_upload_path()
+    refreshes the timestamp on every use, so a file a live session still needs
+    is never taken out from under it.
+    """
+    try:
+        entries = list(os.scandir(UPLOAD_TMP_DIR))
+    except OSError:
+        return  # directory not created yet, or unreadable; nothing to sweep
+
+    cutoff = time.time() - UPLOAD_MAX_AGE_SECONDS
+    for entry in entries:
+        try:
+            if entry.is_file() and entry.stat().st_mtime < cutoff:
+                os.remove(entry.path)
+        except OSError:
+            continue  # already gone, or held open elsewhere; skip it
+
+
+def store_uploaded_file(file_bytes: bytes) -> str:
+    """Write the upload to ephemeral disk and return the path to it."""
+    os.makedirs(UPLOAD_TMP_DIR, exist_ok=True)
+    path = os.path.join(UPLOAD_TMP_DIR, f"{uuid.uuid4().hex}.txt.gz")
+    with open(path, "wb") as fh:
+        fh.write(file_bytes)
+    return path
+
+
+def discard_stored_upload() -> None:
+    """Delete this session's stored upload, if it still has one."""
+    path = st.session_state.get("pgs_file_path")
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    st.session_state["pgs_file_path"] = None
+
+
+def stored_upload_path() -> str | None:
+    """
+    Path to this session's uploaded file, or None if it was never stored or
+    has since been swept away.
+
+    Touching the file's mtime on each access marks it as still in use, which
+    is what keeps sweep_stale_uploads() from reclaiming a file belonging to a
+    session that is simply taking a long time.
+    """
+    path = st.session_state.get("pgs_file_path")
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        os.utime(path, None)
+    except OSError:
+        pass
+    return path
+
+
 STEP_ORDER = ["welcome", "upload", "rsid_guide", "ld_choice", "ld_auth", "config", "execute"]
 STEP_DISPLAY_NUMBER = {
     "welcome": "1",
@@ -190,7 +265,7 @@ def init_session_state() -> None:
     """Populate st.session_state with default values the first time the app runs."""
     defaults = {
         "wizard_step": "welcome",
-        "pgs_file_bytes": None,
+        "pgs_file_path": None,
         "pgs_file_name": None,
         "pgs_file_signature": None,
         "pgs_file_is_harmonized": None,
@@ -404,6 +479,7 @@ st.markdown(
 )
 
 init_session_state()
+sweep_stale_uploads()
 
 st.title("🧬 PGS Grep")
 st.caption(
@@ -560,8 +636,11 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
             signature = f"{file_name}:{compute_md5(file_bytes)}"
             if signature != st.session_state["pgs_file_signature"]:
                 reset_downstream_state()
+                # Drop the previous file from disk before replacing it, so a
+                # session that uploads repeatedly leaves only one file behind.
+                discard_stored_upload()
                 st.session_state["pgs_file_signature"] = signature
-                st.session_state["pgs_file_bytes"] = file_bytes
+                st.session_state["pgs_file_path"] = store_uploaded_file(file_bytes)
                 st.session_state["pgs_file_name"] = file_name
 
             if uploaded_md5 is not None:
@@ -578,12 +657,13 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
                         "The file may be corrupted, proceed with caution."
                     )
 
-    if st.session_state["pgs_file_bytes"] is not None:
+    if stored_upload_path() is not None:
         st.success(f"📄 File ready: `{st.session_state['pgs_file_name']}`")
         if st.session_state["preview_metadata"] is None:
             try:
-                preview_file = io.BytesIO(st.session_state["pgs_file_bytes"])
-                preview_meta = appV3.extract_pgs_metadata(preview_file)
+                # extract_pgs_metadata takes a path as readily as a file object,
+                # so the upload never has to be read back into memory here.
+                preview_meta = appV3.extract_pgs_metadata(stored_upload_path())
                 st.session_state["preview_metadata"] = preview_meta
                 raw_build = preview_meta.get("hmpos_build", preview_meta.get("genome_build"))
                 if raw_build:
@@ -616,7 +696,7 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
             st.rerun()
     with col_next:
         can_advance = (
-            st.session_state["pgs_file_bytes"] is not None
+            stored_upload_path() is not None
             and st.session_state.get("pgs_file_is_harmonized") is not False
         )
         if st.button("Next", type="primary", width='stretch', disabled=not can_advance):
@@ -1017,6 +1097,16 @@ def run_scan() -> None:
     start_window = s["target_pos"] - s["window_size"]
     end_window = s["target_pos"] + s["window_size"]
 
+    scan_path = stored_upload_path()
+    if scan_path is None:
+        # The stored upload expired or was swept while this session sat idle.
+        st.error(
+            "**Your uploaded file is no longer available.** Uploads are held "
+            "only temporarily on the server. Please go back to Step 2 and "
+            "upload the score file again."
+        )
+        return
+
     engine = appV3.PGSScanEngine(token=s["ldlink_token"])
     status_placeholder = st.empty()
 
@@ -1057,9 +1147,8 @@ def run_scan() -> None:
             progress_bar.progress(clamped, text=f"Scanning… {pct}%")
             progress_status.caption(f"Variants in window so far: **{variants_found}**")
 
-        file_object = io.BytesIO(s["pgs_file_bytes"])
         exact_match, proxy_matches, results_df = engine.execute_scan(
-            file_object=file_object,
+            file_object=scan_path,
             chr_number=s["chromosome"],
             target_pos=s["target_pos"],
             start_window=start_window,

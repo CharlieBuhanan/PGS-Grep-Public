@@ -15,6 +15,7 @@ import gzip
 import io
 import os
 import textwrap
+import time
 
 import pandas as pd
 import pytest
@@ -672,18 +673,22 @@ def _fake_columns(spec, **kwargs):
 
 
 @pytest.fixture()
-def gui_state():
+def gui_state(tmp_path, monkeypatch):
     """
     Fresh, isolated session_state + a controllable `st` mock for each
     StreamlitGUI test. Resets call history so assertions on st.error /
     st.warning / st.button etc. only see calls made by the test itself,
     and gives every test a clean wizard state via init_session_state().
+
+    UPLOAD_TMP_DIR is redirected into the test's tmp_path so uploads written
+    to disk stay hermetic and never litter the real system temp directory.
     """
     gui.st.reset_mock()
     gui.st.session_state = {}
     gui.st.columns = MagicMock(side_effect=_fake_columns)
     gui.st.button = MagicMock(return_value=False)
     gui.st.file_uploader = MagicMock(return_value=None)
+    monkeypatch.setattr(gui, "UPLOAD_TMP_DIR", str(tmp_path / "uploads"))
     gui.init_session_state()
     return gui.st.session_state
 
@@ -767,7 +772,7 @@ def test_oversized_upload_shows_error_and_blocks_next(gui_state):
 
     gui.render_step2_upload()
 
-    assert gui_state["pgs_file_bytes"] is None
+    assert gui_state["pgs_file_path"] is None
     error_text = " ".join(str(c.args[0]) for c in gui.st.error.call_args_list)
     assert f"exceeds the {gui.max_pgs_file_size_mb()} MB limit" in error_text
     assert _button_call("Next").kwargs["disabled"] is True
@@ -786,8 +791,122 @@ def test_file_exactly_at_size_limit_is_accepted(gui_state):
 
     gui.render_step2_upload()
 
-    assert gui_state["pgs_file_bytes"] == raw
+    # The upload is now held on disk rather than in session_state; the bytes
+    # must round-trip through that file unchanged.
+    stored = gui_state["pgs_file_path"]
+    assert stored is not None
+    with open(stored, "rb") as fh:
+        assert fh.read() == raw
     assert gui.st.error.call_args_list == []
+
+
+# ── Uploads are held on disk, not in session_state ─────────────────────────
+
+def test_upload_is_not_retained_in_session_state(gui_state):
+    """The uploaded bytes must not be parked in session_state: that is
+    per-user and lives for the whole session, so a large upload there
+    multiplies with concurrency. Only a path may be kept."""
+    raw = make_harmonized_gz()
+    gui.st.file_uploader = MagicMock(
+        return_value=FakeUploadedFile(raw, "PGS000014_hmPOS_GRCh38.txt.gz")
+    )
+
+    gui.render_step2_upload()
+
+    assert gui_state["pgs_file_path"] is not None
+    assert not any(
+        isinstance(v, (bytes, bytearray)) and len(v) >= len(raw)
+        for v in gui_state.values()
+    ), "no session_state entry may hold the uploaded bytes"
+
+
+def test_replacing_upload_deletes_the_previous_file(gui_state):
+    """Uploading a second file must delete the first one's temp file, so a
+    session that re-uploads repeatedly leaves only one file on disk."""
+    gui.st.file_uploader = MagicMock(
+        return_value=FakeUploadedFile(
+            make_harmonized_gz(), "PGS000014_hmPOS_GRCh38.txt.gz")
+    )
+    gui.render_step2_upload()
+    first_path = gui_state["pgs_file_path"]
+    assert os.path.exists(first_path)
+
+    # A different file (different name -> different signature)
+    gui.st.file_uploader = MagicMock(
+        return_value=FakeUploadedFile(
+            make_harmonized_gz(), "PGS000018_hmPOS_GRCh38.txt.gz")
+    )
+    gui.render_step2_upload()
+    second_path = gui_state["pgs_file_path"]
+
+    assert second_path != first_path
+    assert not os.path.exists(first_path), "previous upload should be deleted"
+    assert os.path.exists(second_path)
+
+
+def test_stored_upload_path_returns_none_when_file_is_gone(gui_state, tmp_path):
+    """If the stored file has been swept away, stored_upload_path() must
+    report None rather than handing back a dead path."""
+    ghost = tmp_path / "already-deleted.txt.gz"
+    gui_state["pgs_file_path"] = str(ghost)
+    assert gui.stored_upload_path() is None
+
+
+def test_run_scan_errors_clearly_when_upload_expired(gui_state, tmp_path):
+    """A session whose upload was swept must get an actionable message telling
+    it to re-upload, not a crash or a silently empty result."""
+    gui_state["pgs_file_path"] = str(tmp_path / "gone.txt.gz")
+    gui_state["chromosome"] = 10
+    gui_state["target_pos"] = 112998590
+    gui_state["target_rsid"] = "rs7903146"
+    gui_state["window_size"] = 0
+    gui_state["want_ld_proxies"] = "No, scan target position only"
+
+    gui.run_scan()
+
+    assert gui_state["scan_results"] is None
+    error_text = " ".join(str(c.args[0]) for c in gui.st.error.call_args_list)
+    assert "no longer available" in error_text
+    assert "upload the score file again" in error_text
+
+
+def test_sweep_removes_only_stale_uploads(gui_state, tmp_path):
+    """The startup sweep must reclaim orphaned files past the age cutoff while
+    leaving a freshly-touched file (one a live session may still need) alone."""
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    fresh = upload_dir / "fresh.txt.gz"
+    stale = upload_dir / "stale.txt.gz"
+    fresh.write_bytes(b"fresh")
+    stale.write_bytes(b"stale")
+
+    # Backdate the stale file past the cutoff
+    old = time.time() - gui.UPLOAD_MAX_AGE_SECONDS - 60
+    os.utime(stale, (old, old))
+
+    gui.sweep_stale_uploads()
+
+    assert fresh.exists(), "a recently-used upload must survive the sweep"
+    assert not stale.exists(), "an orphaned upload past the cutoff must be removed"
+
+
+def test_sweep_is_safe_when_upload_dir_missing(gui_state):
+    """Sweeping before any upload has ever been stored must be a no-op, not
+    an error on a directory that does not exist yet."""
+    gui.sweep_stale_uploads()  # UPLOAD_TMP_DIR was never created
+
+
+def test_stored_upload_path_refreshes_mtime(gui_state, tmp_path):
+    """Accessing the stored upload marks it as in use, which is what stops the
+    sweep from reclaiming a file belonging to a slow-but-live session."""
+    stored = tmp_path / "in-use.txt.gz"
+    stored.write_bytes(b"data")
+    old = time.time() - gui.UPLOAD_MAX_AGE_SECONDS - 60
+    os.utime(stored, (old, old))
+    gui_state["pgs_file_path"] = str(stored)
+
+    assert gui.stored_upload_path() == str(stored)
+    assert stored.stat().st_mtime > old, "access should refresh the timestamp"
 
 
 # ── Session state survives moving back and forth between wizard steps ──────
@@ -1215,7 +1334,7 @@ def test_active_ld_thresholds_both_when_both_required(gui_state):
 
 # ── run_scan() precomputes and caches export_df/csv_bytes ──────────────────
 
-def test_run_scan_caches_export_df_and_csv_bytes(gui_state):
+def test_run_scan_caches_export_df_and_csv_bytes(gui_state, tmp_path):
     """run_scan() must precompute the filtered export DataFrame and the
     downloadable CSV bytes once, and cache both in scan_results, so
     render_results() never has to redo that work on a later rerun (and so
@@ -1225,7 +1344,9 @@ def test_run_scan_caches_export_df_and_csv_bytes(gui_state):
         chr_name\tchr_position\trsID\teffect_allele\tother_allele\teffect_weight
         10\t112998590\trs7903146\tT\tC\t0.42
         """)
-    gui_state["pgs_file_bytes"] = _gz_bytes(content)
+    stored = tmp_path / "upload.txt.gz"
+    stored.write_bytes(_gz_bytes(content))
+    gui_state["pgs_file_path"] = str(stored)
     gui_state["chromosome"] = 10
     gui_state["target_pos"] = 112998590
     gui_state["target_rsid"] = "rs7903146"

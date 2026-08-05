@@ -13,6 +13,7 @@ venv/
 # error_debug_log_*.html is written only when LDlink returns an HTML error page.
 LD_API_Results/
 error_debug_log*.html
+.claude/
 
 # OS
 # .vscode/settings.json is intentionally tracked (shared cSpell dictionary).
