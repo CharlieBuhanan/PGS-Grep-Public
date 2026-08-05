@@ -756,12 +756,12 @@ def test_harmonized_upload_has_no_error_and_enables_next(gui_state):
 # ── Oversized upload: must error and block progress ─────────────────────────
 
 def test_oversized_upload_shows_error_and_blocks_next(gui_state):
-    """A file over the 200 MB cap must be rejected with a clear error,
+    """A file over the upload cap must be rejected with a clear error,
     never stored in session_state, and must leave Next disabled."""
     oversized = FakeUploadedFile(
         b"tiny content",
         "PGS000014_hmPOS_GRCh38.txt.gz",
-        size=gui.MAX_PGS_FILE_SIZE_BYTES + 1,
+        size=gui.max_pgs_file_size_mb() * 1024 * 1024 + 1,
     )
     gui.st.file_uploader = MagicMock(return_value=oversized)
 
@@ -769,16 +769,18 @@ def test_oversized_upload_shows_error_and_blocks_next(gui_state):
 
     assert gui_state["pgs_file_bytes"] is None
     error_text = " ".join(str(c.args[0]) for c in gui.st.error.call_args_list)
-    assert "exceeds the 200 MB limit" in error_text
+    assert f"exceeds the {gui.max_pgs_file_size_mb()} MB limit" in error_text
     assert _button_call("Next").kwargs["disabled"] is True
 
 
 def test_file_exactly_at_size_limit_is_accepted(gui_state):
     """Boundary check: the cap is a strict '>' comparison, so a file of
-    exactly MAX_PGS_FILE_SIZE_BYTES must be accepted, not rejected."""
+    exactly the limit must be accepted, not rejected."""
     raw = make_harmonized_gz()
     exact = FakeUploadedFile(
-        raw, "PGS000014_hmPOS_GRCh38.txt.gz", size=gui.MAX_PGS_FILE_SIZE_BYTES
+        raw,
+        "PGS000014_hmPOS_GRCh38.txt.gz",
+        size=gui.max_pgs_file_size_mb() * 1024 * 1024,
     )
     gui.st.file_uploader = MagicMock(return_value=exact)
 

@@ -10,9 +10,9 @@ venv/
 
 # Runtime artifacts
 # LD_API_Results is a local response cache rebuilt on demand from LDlink;
-# error_debug_log.html is written only when LDlink returns an HTML error page.
+# error_debug_log_*.html is written only when LDlink returns an HTML error page.
 LD_API_Results/
-error_debug_log.html
+error_debug_log*.html
 
 # OS
 # .vscode/settings.json is intentionally tracked (shared cSpell dictionary).

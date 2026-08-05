@@ -27,7 +27,7 @@ pip install -r requirements.txt
 
 ## Usage
 
-First, find and download the score you want to scan from the PGS Catalog (https://www.pgscatalog.org/). Download the **harmonized** scoring file — the one whose filename ends in `_hmPOS_GRCh38.txt.gz` or `_hmPOS_GRCh37.txt.gz`, depending on which genome build you want to search. Leave it gzipped; the app reads `.gz` directly and accepts uploads up to 200 MB. Optionally download the matching `.md5` checksum file as well, and the app will verify the download's integrity for you.
+First, find and download the score you want to scan from the PGS Catalog (https://www.pgscatalog.org/). Download the **harmonized** scoring file — the one whose filename ends in `_hmPOS_GRCh38.txt.gz` or `_hmPOS_GRCh37.txt.gz`, depending on which genome build you want to search. Leave it gzipped; the app reads `.gz` directly. Optionally download the matching `.md5` checksum file as well, and the app will verify the download's integrity for you.
 
 Then, **from the repository root**, launch the app:
 
@@ -38,6 +38,24 @@ python -m streamlit run StreamlitGUI.py
 Running from the repository root matters: Streamlit loads `.streamlit/config.toml` and serves the bundled Roboto fonts from `static/` relative to the current working directory, so launching from elsewhere will lose the app's theming.
 
 This opens a guided wizard in your browser that walks through uploading the scoring file, entering the rsID or chromosome/position you want to find, optionally supplying an LDlink token to include LD proxies, and running the scan. Results can be reviewed in the browser and exported as CSV.
+
+### Raising the upload limit
+
+Uploads are capped at 100 MB by `server.maxUploadSize` in `.streamlit/config.toml`. The cap is temporary, sized for the 1 GB of RAM a free Streamlit Community Cloud app gets, and applies to local runs too since that config file ships with the repo.
+
+To raise it for a local run, pass the option on the command line — no need to edit the file:
+
+```
+python -m streamlit run StreamlitGUI.py --server.maxUploadSize=1000
+```
+
+To confirm the override took effect:
+
+```
+python -m streamlit config show --server.maxUploadSize=1000
+```
+
+The in-app size check reads this value back at runtime, so the limit shown in the interface always matches what is actually enforced.
 
 ## Running the tests
 

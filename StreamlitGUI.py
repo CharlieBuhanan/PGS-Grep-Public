@@ -478,7 +478,21 @@ is used.""")
         )
 
 
-MAX_PGS_FILE_SIZE_BYTES = 200 * 1024 * 1024
+DEFAULT_MAX_PGS_FILE_SIZE_MB = 100
+
+
+def max_pgs_file_size_mb() -> int:
+    """
+    The upload cap, in MB, read back from Streamlit's own server.maxUploadSize.
+
+    Sourcing it here rather than hardcoding it means the in-app check can never
+    drift from what the transport layer actually enforces, including when a local
+    run raises it with `--server.maxUploadSize=N`.
+    """
+    try:
+        return int(st.config.get_option("server.maxUploadSize"))
+    except Exception:
+        return DEFAULT_MAX_PGS_FILE_SIZE_MB
 
 
 def render_step2_upload() -> None:
@@ -491,6 +505,8 @@ def render_step2_upload() -> None:
     be mixed with a new source file.
     """
     st.header("📁 Get Your PGS File from the PGS Catalog")
+
+    max_mb = max_pgs_file_size_mb()
 
     with st.expander("ℹ️ How do I download a harmonized PGS file?", expanded=False):
         st.markdown(
@@ -505,7 +521,7 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
    or `_hmPOS_GRCh37.txt.gz`, depending on the genome build.""", help = "GRCh38 (hg38) and GRCh37 (hg19) are two reference assemblies, and a variant sits at a different position in each. Pick the build you will look your rsID up in.")
 
         st.markdown("5. Download the optional corresponding MD5 file if you want to verify the download's integrity.", help = "A checksum file (.md5 or .txt) that PGS Grep can use to confirm the download arrived intact.")
-        st.markdown("6. No need to unzip. Upload the `.txt.gz` file directly below and the MD5 file if you have it. 200 megabytes is the maximum size for file uploads.", help="PGS Grep reads .gz files as-is. No PGS Catalog score file exceeds 200 MB as of June 2026.")
+        st.markdown(f"6. No need to unzip. Upload the `.txt.gz` file directly below and the MD5 file if you have it. {max_mb} megabytes is the maximum size for file uploads.", help=f"PGS Grep reads .gz files as-is. The {max_mb} MB cap is temporary while this site is hosted for free.")
 
     col_upload, col_md5 = st.columns([1,1])
     with col_upload:
@@ -519,15 +535,23 @@ You can also search the Catalog by publication (author name, journal, PGP ID, or
             "Upload MD5", type=["md5"], key="md5_uploader",
             label_visibility="collapsed",
         )
-    st.caption("200 MB maximum file size. Must be in harmonized format.")
+    st.caption(
+        f"{max_mb} MB maximum file size. Must be in harmonized format."
+    )
+    st.caption(
+        f":grey[The {max_mb} MB limit is temporary while PGS Grep is in testing and "
+        "hosted as a free site. Running the app locally lets you raise it.]"
+    )
 
     if uploaded_file is not None:
-        if uploaded_file.size > MAX_PGS_FILE_SIZE_BYTES:
+        if uploaded_file.size > max_mb * 1024 * 1024:
             st.error(
                 f"**'{uploaded_file.name}' is "
-                f"{uploaded_file.size / (1024 * 1024):.1f} MB, which exceeds the 200 MB limit** "
-                "for this hosted demo. Please use a smaller/compressed file, or download and run "
-                "PGS Grep locally (see the note on the Welcome page) to remove this limit."
+                f"{uploaded_file.size / (1024 * 1024):.1f} MB, which exceeds the "
+                f"{max_mb} MB limit** for this hosted demo. This limit is temporary "
+                "while PGS Grep is in testing and hosted as a free site. Please use a "
+                "smaller score, or download and run PGS Grep locally (see the note on "
+                "the Welcome page), where you can raise the limit."
             )
         else:
             file_bytes = uploaded_file.read()
@@ -775,7 +799,7 @@ def render_step4_5_ld_auth() -> None:
         value=st.session_state["ldlink_token"],
         type="password",
         key="ldlink_token_widget",
-        help="Results are cached locally, so repeating a query skips the API call.",
+        help="LD results are cached on the server, so repeating a query skips the API call.",
     )
     st.session_state["ldlink_token"] = st.session_state["ldlink_token_widget"]
     token_value = st.session_state["ldlink_token"].strip()

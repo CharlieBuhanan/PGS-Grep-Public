@@ -14,6 +14,7 @@ import gzip
 import io
 import os
 import struct
+import uuid
 from datetime import date
 from typing import Final
 import streamlit as st # type: ignore
@@ -243,6 +244,19 @@ class PGSScanEngine:
         self.last_metadata: dict = {}
         os.makedirs(constants.LD_CACHE_DIR, exist_ok=True)
 
+    def _redact(self, text: str) -> str:
+        """
+        Strip the API token out of text before it is displayed or written to disk.
+
+        The token travels in the LDlink request URL's query string, so it can come
+        back to us inside exception messages and inside server error pages that echo
+        the requested URI. Every path that surfaces or persists such text goes
+        through here.
+        """
+        if not self.token:
+            return text
+        return text.replace(self.token, "***")
+
     def _cache_path(self, rsid: str, population: str, genome_build: str) -> str:
         """
         Generate a local cache file path for LD proxy data, as to not repeat API calls.
@@ -363,7 +377,7 @@ class PGSScanEngine:
         try:
             response = requests.get(url, timeout=30)
         except Exception as e:
-            st.error(f"❌ Network error contacting LDlink: {e}")
+            st.error(f"❌ Network error contacting LDlink: {self._redact(str(e))}")
             return self.ld_map
 
         if response.status_code != 200:
@@ -374,20 +388,24 @@ class PGSScanEngine:
 
         if text.strip().startswith("<!DOCTYPE") or "<html" in text.lower():
             st.error(
-                "❌ LDlink returned an HTML error page — check your token, "
+                "❌ LDlink returned an HTML error page: check your token, "
                 "network proxy, or target rsID."
             )
-            with open("error_debug_log.html", "w", encoding="utf-8") as f:
-                f.write(text)
+            # Unique per write: on a hosted deployment every session shares one
+            # filesystem, so a fixed name lets concurrent users clobber each other.
+            debug_path = f"error_debug_log_{uuid.uuid4().hex[:8]}.html"
+            with open(debug_path, "w", encoding="utf-8") as f:
+                f.write(self._redact(text))
             return self.ld_map
 
         if "error" in text.lower() or "API token invalid" in text:
-            st.error(f"❌ LDlink API error: {text.strip()}")
+            st.error(f"❌ LDlink API error: {self._redact(text.strip())}")
             return self.ld_map
 
-        # Cache the raw response unfiltered — threshold changes reuse this file
+        # Cache the raw response unfiltered — threshold changes reuse this file.
+        # Redacted because on a hosted deployment this cache is shared across sessions.
         with open(cache_file, "w", encoding="utf-8") as f:
-            f.write(text)
+            f.write(self._redact(text))
         st.success(f"✅ LD response saved to cache: `{cache_file}`")
 
         self.ld_map = self._parse_ld_text(text, r2_threshold, dprime_threshold)

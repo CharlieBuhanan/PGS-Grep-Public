@@ -1,3 +1,8 @@
+# Hide tracebacks from the browser; they expose file paths and code to anyone
+# who triggers a crash on the public demo. Errors still reach the server logs.
+[client]
+showErrorDetails = "none"
+
 [theme]
 base = "light"
 
@@ -50,3 +55,10 @@ weight = 400
 
 [server]
 enableStaticServing = true
+
+# Rejects oversized uploads before they are buffered into memory; the in-app
+# check runs too late to prevent the spike. Temporary limit for free-tier
+# hosting. A local run can lift it without editing this file:
+#   streamlit run StreamlitGUI.py --server.maxUploadSize=1000
+# The in-app check reads this value back at runtime, so both layers stay in step.
+maxUploadSize = 100
