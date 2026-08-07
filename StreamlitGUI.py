@@ -511,7 +511,7 @@ from many genetic variants. A PGS file lists those variants and the weight each 
 **SNP (Single Nucleotide Polymorphism)**: One position in the genome where the DNA
 letter (A, T, C, or G) varies between people. PGS Grep locates SNPs by their chromosome and position.
 
-**RSID**: The "rs"-prefixed label assigns to a SNP, such as rs1260326. It is determined by dbSNP, a free public archive.
+**RSID**: The "rs"-prefixed label assigned to a SNP, such as rs1260326. It is determined by dbSNP, a free public archive.
 
 **LD (Linkage Disequilibrium)**: The tendency of two nearby variants to appear together rather than being inherited independently.
 
@@ -709,7 +709,7 @@ def render_step3_rsid_guide() -> None:
     Help the user find the physical genomic coordinates (chromosome +
     base-pair position) of their target RSID, using the genome build
     parsed from the PGS file they just uploaded as the correct reference
-    assembly to select in NCBI's Genome Data Viewer, then collect the
+    assembly to read coordinates from in NCBI dbSNP, then collect the
     target rsID, chromosome, center position, and genome build directly
     on this step. Genome build is grouped with the coordinates here (and
     is only editable here) because a chromosome/position pair is only
@@ -734,14 +734,17 @@ def render_step3_rsid_guide() -> None:
     st.subheader("How to find the coordinates")
     st.markdown(
         f"""
-1. Open the [NCBI Genome Data Viewer](https://www.ncbi.nlm.nih.gov/gdv), a browser for
-   genomic data run by the National Library of Medicine.
+1. Open [NCBI dbSNP](https://www.ncbi.nlm.nih.gov/snp/), the variant database run by
+   the National Library of Medicine.
 2. Search for your rsID (e.g. `rs1260326`).
-3. **Set the reference assembly to `{detected_build}` to match your uploaded PGS file.**
-   The same variant sits at different coordinates in different assemblies, so a
-   mismatch here sends the scan to the wrong place.
-4. Copy down the **chromosome number** and **base-pair position** listed for that
+3. **Read the position listed for `{detected_build}` to match your uploaded PGS file.**
+   dbSNP lists each assembly separately, and the same variant sits at different
+   coordinates in each, so a mismatch here sends the scan to the wrong place.
+4. Copy down the **chromosome number** and **base-pair position** shown for that
    assembly, or leave the tab open, and fill them in below.
+
+If a variant is missing from dbSNP, the [Genome Data Viewer](https://www.ncbi.nlm.nih.gov/gdv)
+shows the same coordinates.
         """
     )
 
@@ -781,7 +784,7 @@ def render_step3_rsid_guide() -> None:
         value=st.session_state["target_pos_text"],
         key="target_pos_text_widget",
         on_change=_sync_target_pos_from_text,
-        help="Base-pair position from the Genome Data Viewer. Commas are fine "
+        help="Base-pair position from dbSNP. Commas are fine "
              "(27,508,073 and 27508073 both work). Must be a positive whole number.",
     )
     st.session_state["target_pos_text"] = st.session_state["target_pos_text_widget"]
@@ -1207,13 +1210,12 @@ def render_results() -> None:
 
     st.subheader("Scan Results")
     if exact_match:
-        st.balloons()
         st.markdown(
             f"""
             <div style="background:#d4edda;border:2px solid #28a745;border-radius:8px;
                         padding:16px 20px;margin-bottom:12px;font-size:1.15rem;
                         font-weight:700;color:#155724;text-align:center;">
-              EXACT MATCH FOUND: {s['target_rsid']} at Chr{s['chromosome']}:{s['target_pos']:,}
+              Your SNP was found (Exact Match): {s['target_rsid']} at Chr{s['chromosome']}:{s['target_pos']:,}
             </div>
             """,
             unsafe_allow_html=True,
@@ -1224,7 +1226,7 @@ def render_results() -> None:
             <div style="background:#cce5ff;border:2px solid #004085;border-radius:8px;
                         padding:16px 20px;margin-bottom:12px;font-size:1.1rem;
                         font-weight:700;color:#004085;text-align:center;">
-              PROXY MATCH: Target absent at Chr{s['chromosome']}:{s['target_pos']:,}, but
+              Your SNP was absent at Chr{s['chromosome']}:{s['target_pos']:,}, but
               {len(proxy_matches)} LD-linked proxy variant(s) found in the window.
             </div>
             """,
